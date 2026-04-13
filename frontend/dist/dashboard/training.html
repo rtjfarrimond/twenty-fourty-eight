@@ -119,7 +119,36 @@
             border-radius: 6px;
             padding: 20px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            position: relative;
         }
+
+        .chart-container:fullscreen {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .chart-container:fullscreen canvas {
+            max-height: 80vh;
+        }
+
+        .fullscreen-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: 1px solid #bbada0;
+            border-radius: 4px;
+            color: #8f7a66;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 12px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .fullscreen-btn:hover { opacity: 1; }
 
         @media (max-width: 768px) {
             .charts { grid-template-columns: 1fr; }
@@ -168,10 +197,12 @@
 
         <div class="charts">
             <div class="chart-container">
+                <button class="fullscreen-btn" onclick="toggleFullscreen(this.parentElement)">Expand</button>
                 <h2>Average Score</h2>
                 <canvas id="score-chart"></canvas>
             </div>
             <div class="chart-container">
+                <button class="fullscreen-btn" onclick="toggleFullscreen(this.parentElement)">Expand</button>
                 <h2>Tile Reach Rate (%)</h2>
                 <canvas id="tile-chart"></canvas>
             </div>
@@ -341,6 +372,20 @@
                 document.getElementById('status-label').textContent = 'Reconnecting...';
             });
         }
+
+        function toggleFullscreen(element) {
+            if (document.fullscreenElement === element) {
+                document.exitFullscreen();
+            } else {
+                element.requestFullscreen();
+            }
+        }
+
+        document.addEventListener('fullscreenchange', () => {
+            document.querySelectorAll('.fullscreen-btn').forEach(btn => {
+                btn.textContent = document.fullscreenElement === btn.parentElement ? 'Exit' : 'Expand';
+            });
+        });
 
         connectStream();
     </script>
