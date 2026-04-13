@@ -38,13 +38,13 @@ fn main() {
             bin_path: "ntuple-4x6-td0-1M.bin".to_string(),
             name: "ntuple-4x6-td0-1M".to_string(),
             description: "N-tuple TD(0), 32 patterns, lr=0.0025, 1M training games.".to_string(),
-            log_path: None, // Log was overwritten; eval from model directly
+            log_path: Some("ntuple-4x6-td0-1M.log.jsonl".to_string()),
         },
         TrainedModel {
-            bin_path: "ntuple-4x6-td0-v1.bin".to_string(),
+            bin_path: "ntuple-4x6-td0-100K.bin".to_string(),
             name: "ntuple-4x6-td0-100K".to_string(),
             description: "N-tuple TD(0), 32 patterns, lr=0.0025, 100K training games.".to_string(),
-            log_path: None,
+            log_path: Some("ntuple-4x6-td0-100K.log.jsonl".to_string()),
         },
     ];
 

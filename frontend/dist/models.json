@@ -4,13 +4,115 @@
       "model_name": "ntuple-4x6-td0-1M",
       "model_type": "n-tuple",
       "description": "N-tuple TD(0), 32 patterns, lr=0.0025, 1M training games.",
+      "training_curve": [
+        {
+          "games_trained": 100000,
+          "avg_score": 13073.392,
+          "max_score": 35668,
+          "tile_2048_pct": 6.5,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 200000,
+          "avg_score": 17690.544,
+          "max_score": 40420,
+          "tile_2048_pct": 21.0,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 300000,
+          "avg_score": 20458.12,
+          "max_score": 66964,
+          "tile_2048_pct": 32.5,
+          "tile_4096_pct": 1.2,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 400000,
+          "avg_score": 23125.756,
+          "max_score": 72528,
+          "tile_2048_pct": 41.3,
+          "tile_4096_pct": 2.1999999999999997,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 500000,
+          "avg_score": 25628.268,
+          "max_score": 76220,
+          "tile_2048_pct": 51.7,
+          "tile_4096_pct": 4.5,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 600000,
+          "avg_score": 27864.696,
+          "max_score": 76952,
+          "tile_2048_pct": 53.400000000000006,
+          "tile_4096_pct": 7.4,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 700000,
+          "avg_score": 29642.836,
+          "max_score": 82428,
+          "tile_2048_pct": 60.5,
+          "tile_4096_pct": 7.1,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 800000,
+          "avg_score": 32603.884,
+          "max_score": 84404,
+          "tile_2048_pct": 67.4,
+          "tile_4096_pct": 13.3,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 900000,
+          "avg_score": 34165.768,
+          "max_score": 107812,
+          "tile_2048_pct": 69.3,
+          "tile_4096_pct": 14.8,
+          "tile_8192_pct": 0.1,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 1000000,
+          "avg_score": 35610.344,
+          "max_score": 124464,
+          "tile_2048_pct": 69.6,
+          "tile_4096_pct": 18.7,
+          "tile_8192_pct": 0.4,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        }
+      ],
       "final_eval": {
         "games_trained": 0,
-        "avg_score": 35615.784,
-        "max_score": 103104,
-        "tile_2048_pct": 70.5,
-        "tile_4096_pct": 17.0,
-        "tile_8192_pct": 0.3,
+        "avg_score": 36712.84,
+        "max_score": 136332,
+        "tile_2048_pct": 73.0,
+        "tile_4096_pct": 19.7,
+        "tile_8192_pct": 0.4,
         "tile_16384_pct": 0.0,
         "tile_32768_pct": 0.0
       }
@@ -19,11 +121,113 @@
       "model_name": "ntuple-4x6-td0-100K",
       "model_type": "n-tuple",
       "description": "N-tuple TD(0), 32 patterns, lr=0.0025, 100K training games.",
+      "training_curve": [
+        {
+          "games_trained": 10000,
+          "avg_score": 6740.94,
+          "max_score": 22776,
+          "tile_2048_pct": 0.1,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 20000,
+          "avg_score": 8473.348,
+          "max_score": 26580,
+          "tile_2048_pct": 0.3,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 30000,
+          "avg_score": 9497.98,
+          "max_score": 27760,
+          "tile_2048_pct": 0.8,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 40000,
+          "avg_score": 10020.404,
+          "max_score": 31716,
+          "tile_2048_pct": 0.7000000000000001,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 50000,
+          "avg_score": 10808.268,
+          "max_score": 30524,
+          "tile_2048_pct": 1.1,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 60000,
+          "avg_score": 11190.52,
+          "max_score": 33632,
+          "tile_2048_pct": 2.5,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 70000,
+          "avg_score": 11858.72,
+          "max_score": 29064,
+          "tile_2048_pct": 3.4000000000000004,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 80000,
+          "avg_score": 12038.592,
+          "max_score": 36584,
+          "tile_2048_pct": 4.7,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 90000,
+          "avg_score": 12708.364,
+          "max_score": 32560,
+          "tile_2048_pct": 4.6,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 100000,
+          "avg_score": 12724.872,
+          "max_score": 34748,
+          "tile_2048_pct": 4.0,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        }
+      ],
       "final_eval": {
         "games_trained": 0,
-        "avg_score": 13112.216,
-        "max_score": 36316,
-        "tile_2048_pct": 6.2,
+        "avg_score": 12860.284,
+        "max_score": 36156,
+        "tile_2048_pct": 6.0,
         "tile_4096_pct": 0.0,
         "tile_8192_pct": 0.0,
         "tile_16384_pct": 0.0,
@@ -36,8 +240,8 @@
       "description": "Baseline heuristic: prefers Down, Right, Left, Up in that order.",
       "final_eval": {
         "games_trained": 0,
-        "avg_score": 2500.844,
-        "max_score": 7400,
+        "avg_score": 2594.648,
+        "max_score": 7496,
         "tile_2048_pct": 0.0,
         "tile_4096_pct": 0.0,
         "tile_8192_pct": 0.0,

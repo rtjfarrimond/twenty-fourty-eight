@@ -47,8 +47,8 @@ fn main() {
 
     let eval_games: u32 = 1000;
     let learning_rate: f32 = 0.0025;
-    let log_path = "training_log.jsonl";
-    let config_path = "training_config.json";
+    let log_path = format!("{model_name}.log.jsonl");
+    let config_path = format!("{model_name}.config.json");
 
     let patterns = standard_6tuple_patterns();
 
@@ -64,7 +64,7 @@ fn main() {
     };
 
     let config_json = serde_json::to_string_pretty(&config).unwrap();
-    std::fs::write(config_path, &config_json).expect("Failed to write config");
+    std::fs::write(&config_path, &config_json).expect("Failed to write config");
 
     println!("Training config:");
     println!("  Model: {model_name}");
@@ -85,7 +85,7 @@ fn main() {
     let mut network = NTupleNetwork::with_symmetry_expansion(&patterns, 0.0);
     let mut rng = rand::rng();
 
-    let log_file = File::create(log_path).expect("Failed to create log file");
+    let log_file = File::create(&log_path).expect("Failed to create log file");
     let mut log_writer = BufWriter::new(log_file);
 
     for game in 1..=num_games {

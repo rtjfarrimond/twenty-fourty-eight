@@ -36,7 +36,7 @@ async fn main() {
              Avg score ~35K, reaches 2048 in ~70% of games.",
         ),
         (
-            "../training/ntuple-4x6-td0-v1.bin",
+            "../training/ntuple-4x6-td0-100K.bin",
             "ntuple-4x6-td0-100K",
             "N-tuple network (4 base 6-tuple patterns) trained with TD(0) \
              and afterstate value functions. 100K training games. \
@@ -96,11 +96,38 @@ async fn main() {
 }
 
 async fn serve_training_log() -> impl IntoResponse {
-    serve_file("../training/training_log.jsonl", "application/jsonl").await
+    match find_latest("../training", "log.jsonl").await {
+        Some(path) => serve_file(&path, "application/jsonl").await,
+        None => serve_file("../training/training_log.jsonl", "application/jsonl").await,
+    }
 }
 
 async fn serve_training_config() -> impl IntoResponse {
-    serve_file("../training/training_config.json", "application/json").await
+    match find_latest("../training", "config.json").await {
+        Some(path) => serve_file(&path, "application/json").await,
+        None => serve_file("../training/training_config.json", "application/json").await,
+    }
+}
+
+/// Finds the most recently modified file matching `*.{suffix}` in a directory.
+async fn find_latest(directory: &str, suffix: &str) -> Option<String> {
+    let mut entries = tokio::fs::read_dir(directory).await.ok()?;
+    let mut latest: Option<(String, std::time::SystemTime)> = None;
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(suffix) {
+            if let Ok(metadata) = entry.metadata().await {
+                if let Ok(modified) = metadata.modified() {
+                    if latest.as_ref().map_or(true, |(_, prev)| modified > *prev) {
+                        latest = Some((entry.path().to_string_lossy().to_string(), modified));
+                    }
+                }
+            }
+        }
+    }
+
+    latest.map(|(path, _)| path)
 }
 
 async fn serve_file(path: &str, content_type: &str) -> axum::response::Response {
