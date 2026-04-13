@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>2048 — Live Training</title>
+    <link rel="stylesheet" href="/nav.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -12,10 +13,11 @@
             font-family: 'Clear Sans', 'Helvetica Neue', Arial, sans-serif;
             background: #faf8ef;
             padding: 30px;
+            padding-top: 78px;
             color: #776e65;
         }
 
-        h1 { font-size: 36px; margin-bottom: 5px; }
+        h1 { font-size: 36px; margin-bottom: 20px; }
 
         .subtitle {
             font-size: 14px;
@@ -134,8 +136,14 @@
     </style>
 </head>
 <body>
+    <nav class="site-nav">
+        <a href="/" class="nav-brand">2048</a>
+        <a href="/">Game</a>
+        <a href="/dashboard.html">Results</a>
+        <a href="/dashboard/training.html" class="active">Training</a>
+    </nav>
+
     <h1>Live Training</h1>
-    <p class="subtitle"><a href="/dashboard.html">Back to model results</a></p>
 
     <div class="status-bar">
         <div id="status-text">

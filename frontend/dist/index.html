@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>2048</title>
+    <link rel="stylesheet" href="/nav.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -20,7 +21,6 @@
             text-align: center;
         }
 
-        /* Top row: title, score, play/watch button */
         .header {
             display: flex;
             justify-content: flex-start;
@@ -73,7 +73,6 @@
             background: #9f8b77;
         }
 
-        /* Middle row: left panel, board, last move */
         .game-area {
             display: flex;
             align-items: flex-start;
@@ -187,23 +186,19 @@
         #play-hint {
             color: #776e65;
             font-size: 14px;
-            margin-bottom: 15px;
-        }
-
-        /* Bottom row: links */
-        .footer-links {
-            color: #776e65;
-            font-size: 14px;
-        }
-
-        .footer-links a {
-            color: #8f7a66;
         }
     </style>
 </head>
 <body>
+    <nav class="site-nav">
+        <a href="/" class="nav-brand">2048</a>
+        <a href="/" class="active">Game</a>
+        <a href="/dashboard.html">Results</a>
+        <a href="/dashboard/training.html">Training</a>
+    </nav>
+    <div class="nav-spacer"></div>
+
     <div class="container">
-        <!-- Top row -->
         <div class="header">
             <h1>2048</h1>
             <div class="header-controls">
@@ -216,7 +211,6 @@
             </div>
         </div>
 
-        <!-- Middle row -->
         <div class="game-area">
             <div class="left-panel" id="left-panel">
                 <p class="intro">Watch trained reinforcement learning models play 2048 in real-time, or take over and play yourself.</p>
@@ -235,13 +229,6 @@
         </div>
 
         <p id="play-hint" style="display:none">Use arrow keys to play</p>
-
-        <!-- Bottom row -->
-        <p class="footer-links">
-            <a href="/dashboard.html">Model results</a>
-            &middot;
-            <a href="/dashboard/training.html">Live training</a>
-        </p>
     </div>
 
     <script type="module">
