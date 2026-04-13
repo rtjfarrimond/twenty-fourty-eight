@@ -7,11 +7,42 @@ use std::arch::x86_64::_pext_u64;
 const TILE_VALUES: usize = 16;
 
 /// Extracts scattered bits from `source` selected by `mask` into a
-/// contiguous result. Uses BMI2 PEXT when available.
+/// contiguous result. Uses BMI2 PEXT hardware instruction.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-fn pext(source: u64, mask: u64) -> u64 {
+fn pext_hw(source: u64, mask: u64) -> u64 {
     unsafe { _pext_u64(source, mask) }
+}
+
+/// Software fallback for PEXT — extracts nibbles selected by the mask.
+/// The mask must select only complete nibbles (each set bit group is 4 bits
+/// aligned to a 4-bit boundary).
+#[inline(always)]
+fn pext_sw(source: u64, mask: u64) -> u64 {
+    let mut result = 0u64;
+    let mut output_shift = 0;
+    let mut remaining_mask = mask;
+    while remaining_mask != 0 {
+        let bit = remaining_mask.trailing_zeros();
+        result |= ((source >> bit) & 0xF) << output_shift;
+        output_shift += 4;
+        remaining_mask &= !(0xF << bit);
+    }
+    result
+}
+
+/// Extracts scattered nibbles from `source` selected by `mask`.
+/// Uses hardware PEXT on x86_64, software fallback otherwise.
+#[inline(always)]
+fn pext(source: u64, mask: u64) -> u64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        pext_hw(source, mask)
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        pext_sw(source, mask)
+    }
 }
 
 /// Builds the PEXT mask for a set of board positions.

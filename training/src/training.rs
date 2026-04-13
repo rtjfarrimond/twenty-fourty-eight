@@ -1,14 +1,7 @@
-use game_engine::{apply_move, empty_tiles, spawn_tile, Board, Direction, MoveTables};
+use game_engine::{Board, EmptyTiles, MoveTables, all_afterstates, spawn_tile};
 use rand::Rng;
 
 use crate::ntuple::NTupleNetwork;
-
-const ALL_DIRECTIONS: [Direction; 4] = [
-    Direction::Left,
-    Direction::Right,
-    Direction::Up,
-    Direction::Down,
-];
 
 /// Result of evaluating a single move, with cached network value.
 struct MoveCandidate {
@@ -18,6 +11,7 @@ struct MoveCandidate {
 }
 
 /// Finds the best move by evaluating all legal afterstates.
+/// Uses batch afterstate computation (single transpose for vertical moves).
 /// Returns None if no legal move exists (game over).
 #[inline]
 fn best_afterstate(
@@ -25,21 +19,23 @@ fn best_afterstate(
     network: &NTupleNetwork,
     tables: &MoveTables,
 ) -> Option<MoveCandidate> {
+    let afterstates = all_afterstates(board, tables);
     let mut best: Option<MoveCandidate> = None;
     let mut best_total = f32::NEG_INFINITY;
 
-    for &direction in &ALL_DIRECTIONS {
-        if let Some((afterstate, reward)) = apply_move(board, direction, tables) {
-            let value = network.evaluate(&afterstate);
-            let total = reward as f32 + value;
-            if total > best_total {
-                best_total = total;
-                best = Some(MoveCandidate {
-                    afterstate,
-                    reward,
-                    value,
-                });
-            }
+    for &(afterstate, reward, changed) in &afterstates {
+        if !changed {
+            continue;
+        }
+        let value = network.evaluate(&afterstate);
+        let total = reward as f32 + value;
+        if total > best_total {
+            best_total = total;
+            best = Some(MoveCandidate {
+                afterstate,
+                reward,
+                value,
+            });
         }
     }
 
@@ -84,12 +80,13 @@ pub fn train_one_game(
     total_score
 }
 
+#[inline]
 fn spawn_random_tile(board: Board, rng: &mut impl Rng) -> Board {
-    let empties = empty_tiles(&board);
+    let empties = EmptyTiles::find(&board);
     if empties.is_empty() {
         return board;
     }
-    let position = empties[rng.random_range(0..empties.len())];
+    let position = empties.get(rng.random_range(0..empties.len()));
     spawn_tile(&board, position.0, position.1, rng.random::<f64>())
 }
 

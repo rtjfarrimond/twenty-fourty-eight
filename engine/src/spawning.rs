@@ -15,6 +15,44 @@ pub fn empty_tiles(board: &Board) -> Vec<(usize, usize)> {
     positions
 }
 
+/// Stack-allocated list of empty tile positions. No heap allocation.
+pub struct EmptyTiles {
+    positions: [(usize, usize); 16],
+    count: usize,
+}
+
+impl EmptyTiles {
+    /// Finds all empty tiles on the board without heap allocation.
+    #[inline]
+    pub fn find(board: &Board) -> Self {
+        let mut positions = [(0, 0); 16];
+        let mut count = 0;
+        let raw = board.raw();
+        for index in 0..16 {
+            if (raw >> (index * 4)) & 0xF == 0 {
+                positions[count] = (index / 4, index % 4);
+                count += 1;
+            }
+        }
+        Self { positions, count }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    #[inline]
+    pub fn get(&self, index: usize) -> (usize, usize) {
+        self.positions[index]
+    }
+}
+
 /// Spawns a tile on the board at the given position.
 /// Exponent is 1 (tile value 2) with 90% probability, 2 (tile value 4) with 10%.
 /// `random_value` should be a float in [0.0, 1.0) used to determine the tile.

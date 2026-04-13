@@ -42,6 +42,30 @@ fn apply_vertical(board: &Board, result_table: &[u16], score_table: &[u32]) -> (
     (result.transpose(), score)
 }
 
+/// Computes all 4 afterstates at once, using a single transpose for vertical moves.
+/// Returns [(afterstate, score, changed)] for [Left, Right, Up, Down].
+pub fn all_afterstates(board: &Board, tables: &MoveTables) -> [(Board, u32, bool); 4] {
+    let (left, left_score) = apply_horizontal(board, &tables.left_result, &tables.left_score);
+    let (right, right_score) =
+        apply_horizontal(board, &tables.right_result, &tables.right_score);
+
+    let transposed = board.transpose();
+    let (up_t, up_score) =
+        apply_horizontal(&transposed, &tables.left_result, &tables.left_score);
+    let (down_t, down_score) =
+        apply_horizontal(&transposed, &tables.right_result, &tables.right_score);
+    let up = up_t.transpose();
+    let down = down_t.transpose();
+
+    let board_raw = board.raw();
+    [
+        (left, left_score, left.raw() != board_raw),
+        (right, right_score, right.raw() != board_raw),
+        (up, up_score, up.raw() != board_raw),
+        (down, down_score, down.raw() != board_raw),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

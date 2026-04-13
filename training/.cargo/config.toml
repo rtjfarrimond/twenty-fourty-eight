@@ -1,2 +1,5 @@
 [build]
+# target-cpu=native enables BMI2 PEXT on supported CPUs.
+# Note: PEXT is microcoded (~18 cycles) on AMD Zen 1/2 (EPYC Rome).
+# On those CPUs, the software fallback may be faster.
 rustflags = ["-C", "target-cpu=native"]

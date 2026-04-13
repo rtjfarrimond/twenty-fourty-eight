@@ -48,15 +48,14 @@ impl Board {
     }
 
     /// Returns a new board with rows and columns swapped.
-    /// Used to apply row-based move logic to columns (for up/down moves).
+    /// Uses fast bitwise delta-swap approach.
     pub fn transpose(&self) -> Self {
-        let mut result = Board::new();
-        for row in 0..4 {
-            for col in 0..4 {
-                result.set_tile(col, row, self.get_tile(row, col));
-            }
-        }
-        result
+        let a = self.state;
+        let t = (a ^ (a >> 12)) & 0x0000f0f00000f0f0;
+        let a = a ^ t ^ (t << 12);
+        let t = (a ^ (a >> 24)) & 0x00000000ff00ff00;
+        let a = a ^ t ^ (t << 24);
+        Self { state: a }
     }
 }
 

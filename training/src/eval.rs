@@ -1,5 +1,5 @@
 use game_engine::{
-    Board, Direction, MoveTables, apply_move, empty_tiles, is_game_over, spawn_tile,
+    Board, Direction, EmptyTiles, MoveTables, apply_move, empty_tiles, is_game_over, spawn_tile,
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -44,35 +44,36 @@ fn max_tile_exponent(board: &Board) -> u8 {
 /// Returns (score, max_tile_exponent).
 fn play_eval_game(network: &NTupleNetwork, tables: &MoveTables, rng: &mut impl Rng) -> (u32, u8) {
     let mut board = Board::new();
-    let empties = empty_tiles(&board);
-    let pos = empties[rng.random_range(0..empties.len())];
+    let empties = EmptyTiles::find(&board);
+    let pos = empties.get(rng.random_range(0..empties.len()));
     board = spawn_tile(&board, pos.0, pos.1, rng.random::<f64>());
-    let empties = empty_tiles(&board);
-    let pos = empties[rng.random_range(0..empties.len())];
+    let empties = EmptyTiles::find(&board);
+    let pos = empties.get(rng.random_range(0..empties.len()));
     board = spawn_tile(&board, pos.0, pos.1, rng.random::<f64>());
 
     let mut score: u32 = 0;
 
-    while !is_game_over(&board, tables) {
-        let best = ALL_DIRECTIONS
-            .iter()
-            .filter_map(|&direction| {
-                apply_move(&board, direction, tables)
-                    .map(|(afterstate, reward)| (afterstate, reward))
-            })
-            .max_by(|(afterstate_a, reward_a), (afterstate_b, reward_b)| {
-                let value_a = *reward_a as f32 + network.evaluate(afterstate_a);
-                let value_b = *reward_b as f32 + network.evaluate(afterstate_b);
-                value_a.partial_cmp(&value_b).unwrap()
-            });
+    loop {
+        let mut best_afterstate = None;
+        let mut best_total = f32::NEG_INFINITY;
 
-        if let Some((afterstate, reward)) = best {
+        for &direction in &ALL_DIRECTIONS {
+            if let Some((afterstate, reward)) = apply_move(&board, direction, tables) {
+                let total = reward as f32 + network.evaluate(&afterstate);
+                if total > best_total {
+                    best_total = total;
+                    best_afterstate = Some((afterstate, reward));
+                }
+            }
+        }
+
+        if let Some((afterstate, reward)) = best_afterstate {
             score += reward;
-            let empties = empty_tiles(&afterstate);
+            let empties = EmptyTiles::find(&afterstate);
             if empties.is_empty() {
                 board = afterstate;
             } else {
-                let pos = empties[rng.random_range(0..empties.len())];
+                let pos = empties.get(rng.random_range(0..empties.len()));
                 board = spawn_tile(&afterstate, pos.0, pos.1, rng.random::<f64>());
             }
         } else {
