@@ -1,44 +1,62 @@
 # 2048 Solver
 
-This project contains source code files for a reinforcement learning-based
-solver of the popular game 2048.
+A reinforcement learning-based solver for the game 2048, with the goal of
+reproducing and ultimately surpassing the current state of the art.
 
 ## Tech Stack
 
-We use Rust as our primary language because it is fast and portable, enabling
-us to train on CPUs and keep the cost (carbon and cash) of the project down.
+Pure Rust. The entire pipeline — game engine, training, inference, and server —
+is implemented in Rust. N-tuple networks are lookup tables, not matrix
+operations, so CPU training is the natural fit (not a compromise). This keeps
+the cost (carbon and cash) of the project down.
+
+### Game Engine
+
+A bitboard representation of the game state (`u64`, 4 bits per tile storing
+exponents), with precomputed lookup tables for moves and scoring. This enables
+simulating millions of games per second, which is critical for training
+throughput. The engine is encapsulated behind a clean API so the internal
+representation can be widened to `u128` (5 bits per tile) later if needed to
+support tiles above 32768.
 
 ### Front End
 
-Rust compiled to WebAssemby visualises the trained model playing 2048 in
-real-time. The agent is continually playing games until it loses and starting a
-new one.
+A Rust/WASM frontend that renders the game state received from the server over
+websocket. The frontend does not run inference — it purely visualises the board.
 
-A button enables the user visiting the site to take over from the agent and
-play the game themselves.
+A single agent game runs continuously on the server at a configurable pace
+(e.g. one move per second), and all visitors watch it in real-time. A button
+enables the user to take over and play the game themselves (the agent's game
+continues in the background). All game state — both agent and user — lives on
+the server, identified by session.
 
-### Backend
+### Training
 
-A highly efficient Rust core representation of the game state and engine,
-optimized to enable agents to play the game both at training and inference
-time.
+N-tuple networks with TD(0) learning and afterstate value functions, following
+the approach of the current SOTA (Wu et al.). Training is pure Rust, using the
+same game engine API as the server. The training pipeline produces a serialized
+model artefact (weight tables + pattern definitions) that is consumed by the
+server for inference.
 
-A web-server that tracks the current state of the game that the agent is
-playing over a websocket, and enables users visiting the front end to play
-games themselves. The server does not keep any local state of user initiated
-games, instead it sends representations of the whole game state between the
-back and frontend, enabling the user's device to keep track of the state and
-reduce server load.
-
-### Model Training
-
-The only part of the codebase that may use python where it is strictly required
-to train the models, since this is the gold standard ecosystem for this type of
-work. Rather than using convolutional networks, as prior work in this area
-does, we instead use the same core Rust API that the backend uses to update
-model state, enabling highly optimized CPU bound training.
+A training dashboard (lightweight web UI, separate from the game frontend)
+visualises score progression, tile-reach percentages, and loss curves over
+training. This is part of the product, not an afterthought.
 
 ### Model Inference
 
-TODO: Figure out how this will work. Should not be python at this point, should
-compile to something fast.
+N-tuple inference is just table lookups — the same Rust code handles both
+training and inference. The server loads a model artefact at startup and
+evaluates positions via an `Agent` trait (`best_move`, `evaluate`), keeping the
+server decoupled from training code. The trait interface also enables swapping
+in different model architectures in future without changing the server.
+
+### Project Structure
+
+- **Game engine crate** — bitboard representation, move logic, scoring
+- **Model format crate** — serialization format, read-only inference struct,
+  `Agent` trait
+- **Training crate** — TD learning loop, evaluation, artefact output. Depends
+  on game engine and model format crates.
+- **Server crate** — web server, websocket, agent game loop. Depends on game
+  engine and model format crates. No dependency on training.
+- **Frontend** — Rust/WASM rendering

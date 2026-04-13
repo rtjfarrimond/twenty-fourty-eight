@@ -1,0 +1,188 @@
+# Design Decisions
+
+Record of architectural decisions made during the design phase.
+
+**Goal:** Ultimately surpass the current state of the art for 2048 RL solvers,
+starting by reproducing existing results first.
+
+---
+
+## 1. Game Engine Core Representation
+
+**Decision:** Start with a `u64` bitboard (4 bits per tile, storing exponents).
+Migrate to `u128` (5 bits per tile) later when pushing beyond state of the art.
+
+**Rationale:**
+- Tiles are powers of 2, so storing the exponent (0–17) is sufficient. Empty = 0.
+- 4 bits per tile x 16 tiles = 64 bits. Enables single-register operations,
+  trivial hashing, and cache-friendly precomputed row-move lookup tables.
+- This caps representable tiles at 2^15 = 32768. The theoretical game maximum
+  is 2^17 = 131072 (with 4-spawns), which needs 5 bits per tile (80 bits, fits
+  in a `u128`).
+- The 32768 cap is fine for reproducing prior work. When surpassing state of
+  the art, the migration to `u128` is contained within the core representation
+  module — the rest of the codebase depends on the API, not the internal
+  encoding.
+- The cost of `u128` is slightly slower operations (not single-register on most
+  architectures) and larger lookup tables. Worth deferring until needed.
+
+---
+
+## 2. Model Architecture
+
+**Decision:** Start with n-tuple networks and TD-learning to reproduce SOTA.
+Explore hybrid/novel architectures in phase 2 to surpass it.
+
+**Rationale:**
+- N-tuple networks *are* the current SOTA for 2048 (Szubert & Jaśkowski; Wu et
+  al.), not convnets. The README's original framing ("rather than using
+  convolutional networks, as prior work does") was inverted — CNNs have been
+  tried but haven't matched n-tuple performance.
+- N-tuple networks are essentially large lookup tables indexed by patterns of
+  tiles on the board. They are fast, simple, and entirely implementable in pure
+  Rust with no Python/ML framework dependency.
+- The model interface is clean (given a board state, return a value or action),
+  so swapping in a different architecture later (MLP, transformer, hybrid) does
+  not affect the game engine or training loop structure.
+- **Phase 2 angles for surpassing SOTA:**
+  - Larger/more n-tuple patterns, systematic pattern search
+  - Deeper expectimax lookahead at inference using the learned value function
+  - Hybrid architectures (neural net complementing n-tuple tables)
+  - Training innovations: multi-stage curriculum, better TD variants, TD +
+    Monte Carlo combinations
+
+**NOTE:** The README should be corrected to reflect that prior SOTA work uses
+n-tuple networks, not convnets.
+
+---
+
+## 3. RL Training Method
+
+**Decision:** TD(0) with afterstate value functions.
+
+**Rationale:**
+- This is the proven pairing with n-tuple networks for 2048 in the literature.
+- Afterstates (the board state after the player moves but before a random tile
+  spawns) are the natural evaluation point — they remove the stochastic element
+  from the value function, making learning more stable.
+- More complex variants (TD(λ), multi-step returns) are possible future
+  improvements but not needed to reproduce SOTA.
+
+---
+
+## 4. Training Hardware
+
+**Decision:** CPU-only for phase 1. GPU may be needed for phase 2.
+
+**Rationale:**
+- N-tuple networks are lookup tables, not matrix multiplications. There is
+  nothing to accelerate on a GPU — CPU training is the natural fit, not a
+  compromise.
+- If phase 2 introduces neural network components (hybrid architectures, MLPs,
+  transformers), GPU training may become relevant at that point.
+
+---
+
+## 5. WebSocket Architecture
+
+**Decision:** One shared agent game, server-authoritative. All game state
+(agent and user) lives on the server.
+
+**Details:**
+- A single agent game runs continuously on the server. All connected visitors
+  watch the same game via websocket, receiving state changes as they happen.
+- When a user takes over to play manually, they get their own independent game
+  with server-side state, identified by session. The agent's game continues in
+  the background — it is not paused or interrupted.
+- Server-side state for user games was chosen over client-stateful design for
+  simplicity of implementation and smaller websocket payloads (send moves, not
+  full board states).
+- **Agent pacing:** The agent plays one move per configurable duration (e.g.
+  one move per second), tuneable to whatever looks right visually. Without
+  this, the agent would play at microsecond speed — unwatchable.
+- **Session cleanup:** Each session has a last-activity timestamp. A background
+  task sweeps periodically and drops sessions idle beyond a threshold (e.g. 5
+  minutes). Websocket disconnection triggers immediate cleanup.
+- **Load characteristics:** The server is extremely lightweight — no database,
+  no disk I/O, no external API calls in the hot path. All in-memory compute
+  completing in microseconds.
+  - Agent watchers: just receiving broadcasts (~1 move/sec, few bytes). 10k+
+    concurrent watchers is feasible.
+  - Active players: each move is a single game engine call (microseconds).
+    Thousands of moves per second on modest hardware.
+  - Bottleneck under extreme load is websocket connection count (OS file
+    descriptors, memory per connection), not CPU.
+  - A max concurrent connections cap should be set so the server degrades
+    gracefully rather than OOMing. No need for connection pooling, queuing, or
+    horizontal scaling. Single async runtime (tokio) on a modest VPS is
+    sufficient.
+
+---
+
+## 6. Model Inference & Artefact Packaging
+
+**Decision:** Training produces a serialized artefact file. The server loads it
+via a shared model-format crate, behind an abstract Agent trait.
+
+**Details:**
+- The trained model (weight tables + tuple pattern definitions for n-tuple
+  networks) is serialized to a binary artefact file (e.g. `model.bin`).
+- **Three-way separation:**
+  - **Training crate** — produces the artefact. Depends on the model format
+    crate. Not depended on by the server.
+  - **Model format crate** — defines the serialization format, a read-only
+    inference struct, and an `Agent` trait (e.g. `best_move(state) -> Move`,
+    `evaluate(state) -> f64`). This is the only coupling point.
+  - **Server crate** — loads the artefact at startup, uses the `Agent` trait
+    for inference. Zero dependency on training code.
+- The `Agent` trait is the stable interface. When phase 2 introduces new model
+  architectures, they implement the same trait. The server doesn't change —
+  just load a different artefact with a different `Agent` implementation.
+
+---
+
+## 7. WASM Frontend
+
+**Decision:** The WASM frontend is purely a renderer. No inference runs
+client-side.
+
+**Rationale:**
+- The agent game runs server-side and streams state over websocket. The
+  frontend just receives board states and renders them.
+- For user-initiated games, the frontend renders the board and sends user
+  inputs to the server, which processes moves (using the game engine) and
+  returns the new state.
+- WASM is used for the rendering/UI layer (smooth animations, responsive
+  interaction), not for computation. This keeps the client lightweight and
+  avoids shipping model artefacts to the browser.
+
+---
+
+## 8. Model Evaluation During Training
+
+**Decision:** Evaluate periodically using standard SOTA metrics. Checkpoint
+artefacts with a retention policy. Training dashboard is a phase 1 deliverable.
+
+**Details:**
+- **Metrics:** Align with prior research (Wu et al.) — average score over N
+  games, plus percentage of games reaching each tile milestone (2048, 4096,
+  8192, 16384, 32768). This enables direct SOTA comparison.
+- **Frequency:** Every 10k–100k training games (tunable). Cheap relative to
+  training.
+- **Reproducibility:** Fixed random seeds for evaluation game sets so that
+  checkpoints can be compared fairly across runs. Seed configuration must be
+  documented.
+- **Checkpointing:** Save model artefacts at each evaluation point. N-tuple
+  weight tables can be large (hundreds of MB to a few GB), so a retention
+  policy is needed — keep the best K checkpoints and every Nth, discard the
+  rest.
+- **Training Dashboard:** A lightweight web UI (separate from the game-playing
+  frontend) that reads training logs (JSON/CSV) and plots score progression,
+  tile-reach percentages, and loss curves over time. This is on the critical
+  path for phase 1 — it is part of the product and must be in place and
+  validated during phase 1 training, not added retroactively.
+- **Note:** User's wife (RL expert) joining at phase 2 — evaluation pipeline
+  should be solid and well-documented by then.
+
+---
+
