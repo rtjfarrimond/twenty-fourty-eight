@@ -85,24 +85,35 @@ pub fn render_game_over(document: &Document, game_over: bool) {
     }
 }
 
-/// Shows or hides the "Use arrow keys to play" hint.
-pub fn render_play_hint(document: &Document, playing: bool) {
-    if let Some(element) = document.get_element_by_id("play-hint") {
-        let display = if playing { "block" } else { "none" };
-        element
-            .set_attribute("style", &format!("display:{display}"))
-            .unwrap();
+/// Switches the UI between watching and playing modes.
+/// Watching: show left panel (dropdown + description), Play button, hide Watch button and hint.
+/// Playing: hide left panel, show Watch button and hint, hide Play button.
+pub fn set_mode(document: &Document, watching: bool) {
+    fn set_display(document: &Document, element_id: &str, display: &str) {
+        if let Some(element) = document.get_element_by_id(element_id) {
+            element
+                .set_attribute("style", &format!("display:{display}"))
+                .unwrap();
+        }
+    }
+
+    if watching {
+        set_display(document, "left-panel", "block");
+        set_display(document, "play-btn", "inline-block");
+        set_display(document, "watch-btn", "none");
+        set_display(document, "play-hint", "none");
+    } else {
+        set_display(document, "left-panel", "none");
+        set_display(document, "play-btn", "none");
+        set_display(document, "watch-btn", "inline-block");
+        set_display(document, "play-hint", "block");
     }
 }
 
-/// Renders model description to the left of the board.
+/// Renders model description in the left panel.
 pub fn render_model_description(document: &Document, description: &str) {
     if let Some(element) = document.get_element_by_id("model-description") {
         element.set_text_content(Some(description));
-        let display = if description.is_empty() { "none" } else { "block" };
-        element
-            .set_attribute("style", &format!("display:{display}"))
-            .unwrap();
     }
 }
 
