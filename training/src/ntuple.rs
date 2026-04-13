@@ -179,6 +179,54 @@ impl NTupleNetwork {
     pub fn num_patterns(&self) -> usize {
         self.masks.len() * 8
     }
+
+    /// Saves the network to a binary file.
+    /// Format: [num_masks: u32] [masks: u64...] [weights: f32...]
+    pub fn save(&self, path: &str) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
+        let num_masks = self.masks.len() as u32;
+        file.write_all(&num_masks.to_le_bytes())?;
+        for &mask in &self.masks {
+            file.write_all(&mask.to_le_bytes())?;
+        }
+        for &weight in &self.weights {
+            file.write_all(&weight.to_le_bytes())?;
+        }
+        file.flush()
+    }
+
+    /// Loads a network from a binary file.
+    pub fn load(path: &str) -> std::io::Result<Self> {
+        use std::io::Read;
+        let mut file = std::io::BufReader::new(std::fs::File::open(path)?);
+
+        let mut buf4 = [0u8; 4];
+        let mut buf8 = [0u8; 8];
+
+        file.read_exact(&mut buf4)?;
+        let num_masks = u32::from_le_bytes(buf4) as usize;
+
+        let mut masks = Vec::with_capacity(num_masks);
+        for _ in 0..num_masks {
+            file.read_exact(&mut buf8)?;
+            masks.push(u64::from_le_bytes(buf8));
+        }
+
+        let table_size = TILE_VALUES.pow(6);
+        let total_weights = num_masks * table_size;
+        let mut weights = Vec::with_capacity(total_weights);
+        for _ in 0..total_weights {
+            file.read_exact(&mut buf4)?;
+            weights.push(f32::from_le_bytes(buf4));
+        }
+
+        Ok(Self {
+            masks,
+            weights,
+            table_size,
+        })
+    }
 }
 
 #[cfg(test)]

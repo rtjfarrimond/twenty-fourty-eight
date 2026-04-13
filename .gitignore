@@ -2,5 +2,6 @@
 perf.data
 perf.data.old
 flamegraph.svg
-training_log.jsonl
-training_config.json
+**/training_log.jsonl
+**/training_config.json
+**/*.bin

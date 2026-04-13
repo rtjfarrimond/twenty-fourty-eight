@@ -8,6 +8,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use game_engine::MoveTables;
 use model::dummy::DummyAgent;
+use model::ntuple_agent::NTupleAgent;
 use session::SessionManager;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +23,18 @@ async fn main() {
 
     let (agent_broadcast, _) = broadcast::channel(16);
 
-    let agent: Arc<dyn model::Agent + Send + Sync> = Arc::new(DummyAgent::new(tables.clone()));
+    let model_path = "../training/ntuple-4x6-td0-v1.bin";
+    let agent: Arc<dyn model::Agent + Send + Sync> =
+        match NTupleAgent::load(model_path, tables.clone()) {
+            Ok(ntuple_agent) => {
+                println!("Loaded trained model from {model_path}");
+                Arc::new(ntuple_agent)
+            }
+            Err(err) => {
+                println!("No trained model found ({err}), using dummy agent");
+                Arc::new(DummyAgent::new(tables.clone()))
+            }
+        };
     let move_interval = Duration::from_millis(500);
 
     let broadcast_sender = agent_broadcast.clone();

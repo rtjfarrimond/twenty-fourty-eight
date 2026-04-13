@@ -1,4 +1,5 @@
 pub mod dummy;
+pub mod ntuple_agent;
 
 use game_engine::{Board, Direction};
 

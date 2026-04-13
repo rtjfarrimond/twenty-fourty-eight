@@ -110,5 +110,9 @@ fn main() {
         }
     }
 
-    println!("\nTraining complete. Log written to {log_path}");
+    let model_path = format!("{model_name}.bin");
+    network.save(&model_path).expect("Failed to save model");
+    println!("\nTraining complete.");
+    println!("  Log: {log_path}");
+    println!("  Model: {model_path}");
 }
