@@ -1,62 +1,38 @@
-# 2048 Solver
+# 2048 AI
 
-A reinforcement learning-based solver for the game 2048, with the goal of
-reproducing and ultimately surpassing the current state of the art.
+A pure Rust reinforcement learning system for 2048 — training, live inference,
+and a playable web demo. No Python, no ML frameworks, no GPU.
 
-## Tech Stack
+## Live Demo
 
-Pure Rust. The entire pipeline — game engine, training, inference, and server —
-is implemented in Rust. N-tuple networks are lookup tables, not matrix
-operations, so CPU training is the natural fit (not a compromise). This keeps
-the cost (carbon and cash) of the project down.
+Watch trained models play at [2048.redact.ing](https://2048.redact.ing). Switch
+between models, or take over and play yourself.
 
-### Game Engine
+## How It Works
 
-A bitboard representation of the game state (`u64`, 4 bits per tile storing
-exponents), with precomputed lookup tables for moves and scoring. This enables
-simulating millions of games per second, which is critical for training
-throughput. The engine is encapsulated behind a clean API so the internal
-representation can be widened to `u128` (5 bits per tile) later if needed to
-support tiles above 32768.
+N-tuple networks learn board evaluation functions through self-play using TD(0)
+with afterstate values. N-tuple networks are lookup tables, not neural networks
+— inference is a handful of table reads per position, and training is pure
+integer arithmetic. A GPU would have nothing to do.
 
-### Front End
+Train a model, point it at the server, and it appears in the live demo
+automatically — no restart, no manual steps. A dashboard streams training
+progress in real-time as it runs.
 
-A Rust/WASM frontend that renders the game state received from the server over
-websocket. The frontend does not run inference — it purely visualises the board.
+## Architecture
 
-A single agent game runs continuously on the server at a configurable pace
-(e.g. one move per second), and all visitors watch it in real-time. A button
-enables the user to take over and play the game themselves (the agent's game
-continues in the background). All game state — both agent and user — lives on
-the server, identified by session.
+Everything is Rust, structured as four crates:
 
-### Training
+- **engine** — `u64` bitboard with precomputed move tables
+- **training** — TD(0) learning loop, evaluation, CLI with named flags
+- **model** — serialization format, `Agent` trait for inference
+- **server** — axum websocket server, hot model loading via inotify, SSE
+  training stream
 
-N-tuple networks with TD(0) learning and afterstate value functions, following
-the approach of the current SOTA (Wu et al.). Training is pure Rust, using the
-same game engine API as the server. The training pipeline produces a serialized
-model artefact (weight tables + pattern definitions) that is consumed by the
-server for inference.
+The frontend is Rust/WASM, rendering game state received over websocket.
 
-A training dashboard (lightweight web UI, separate from the game frontend)
-visualises score progression, tile-reach percentages, and loss curves over
-training. This is part of the product, not an afterthought.
+## Status
 
-### Model Inference
-
-N-tuple inference is just table lookups — the same Rust code handles both
-training and inference. The server loads a model artefact at startup and
-evaluates positions via an `Agent` trait (`best_move`, `evaluate`), keeping the
-server decoupled from training code. The trait interface also enables swapping
-in different model architectures in future without changing the server.
-
-### Project Structure
-
-- **Game engine crate** — bitboard representation, move logic, scoring
-- **Model format crate** — serialization format, read-only inference struct,
-  `Agent` trait
-- **Training crate** — TD learning loop, evaluation, artefact output. Depends
-  on game engine and model format crates.
-- **Server crate** — web server, websocket, agent game loop. Depends on game
-  engine and model format crates. No dependency on training.
-- **Frontend** — Rust/WASM rendering
+Reproducing known results from the literature (Wu et al., Szubert &
+Jaśkowski). Training runs in progress. Goal is to match and then surpass
+state of the art.
