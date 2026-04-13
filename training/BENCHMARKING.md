@@ -79,19 +79,55 @@ Config: 4 base 6-tuple patterns x 8 symmetries = 32 patterns.
 | + flat weight array | 2,084 | 311K | 2.0x |
 | + isomorphic eval (transform board, not patterns) | 2,666 | 734K | 4.8x |
 | + BMI2 PEXT index extraction | 4,136 | 1.01M | 6.6x |
+| + stack-allocated empty tiles | 4,514 | 1.20M | 7.8x |
+| + batch afterstates (single transpose) | 5,132 | 1.26M | 8.2x |
+| + LTO + codegen-units=1 | 5,103 | 1.29M | 8.4x |
 
 Key optimizations (in order of impact):
 1. **Isomorphic evaluation** — store 4 base patterns, transform the board 8
    ways with bitwise flip/transpose. 4x less memory = better cache.
-2. **BMI2 PEXT** — single-instruction index extraction replaces multi-op
-   bitmask approach.
+2. **BMI2 PEXT** — single-instruction index extraction (note: microcoded
+   ~18 cycles on AMD Zen 2, but still faster than software alternative).
 3. **Value caching** — cache network evaluation alongside move candidates to
-   eliminate redundant evaluations.
+   eliminate redundant evaluations in TD update.
 4. **Eliminated redundant game-over checks** — `best_afterstate` returning
    `None` already signals game over.
+5. **Zero-allocation hot path** — stack-allocated empty tile list.
+6. **Batch afterstates** — single transpose for both vertical moves.
+7. **Bitwise board transpose** — delta-swap approach from reference impl.
+8. **LTO** — link-time optimization for cross-crate inlining.
 
-Target: 102M moves/sec (moporgic/TDL2048). Current gap: ~100x. Remaining
-optimizations: compile-time pattern specialization, further loop unrolling,
-multithreading, and possible SIMD.
+## Current bottleneck: memory bandwidth
+
+IPC is 1.19 (vs theoretical 4+). Cache miss rate is 24.6%. The 256MB weight
+table (4 patterns × 16M entries × 4 bytes) far exceeds the 16MB L3 cache on
+this AMD EPYC Rome (Zen 2).
+
+The reference (102M moves/sec) runs on a Ryzen 9 with:
+- 64MB L3 cache (4x ours)
+- Single-cycle PEXT (vs ~18 cycles on Zen 2)
+- Higher single-thread clock speed
+
+Expected performance on equivalent hardware (Zen 3+, 64MB L3): ~5-10x current
+= 6-13M moves/sec. The remaining gap to 102M would be from C++ template
+specialization and years of micro-optimization.
+
+## Failed experiments
+
+- **Row-based precomputed index tables** — 8MB of lookup tables thrashed L2
+  cache. Slower than direct bit extraction.
+- **Software prefetching** — batch-computing all 32 offsets then prefetching
+  added loop overhead that outweighed the latency hiding benefit.
+
+Hardware: AMD EPYC-Rome (Zen 2), 16 vCPUs, 16MB L3 cache, 30GB RAM
+
+## Hardware upgrade path
+
+A Hetzner dedicated server (AX series) with AMD Ryzen 5000/7000 would give:
+- Single-cycle PEXT (vs ~18 cycles on current Zen 2)
+- 32-64MB uncontested L3 cache (vs 16MB shared on current VPS)
+- Estimated 5-10x speedup → 6-13M moves/sec
+
+Options: AX41-NVMe or AX52 (~EUR 44-58/mo). Check current Hetzner lineup.
 
 Hardware: (record your own)

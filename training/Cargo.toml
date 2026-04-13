@@ -5,6 +5,8 @@ edition = "2024"
 
 [profile.release]
 debug = true
+lto = true
+codegen-units = 1
 
 [dependencies]
 game-engine = { path = "../engine" }

@@ -141,12 +141,9 @@ impl NTupleNetwork {
         }
     }
 
-    /// Returns the total value estimate by evaluating all 8 board symmetries.
-    #[inline]
-    pub fn evaluate(&self, board: &Board) -> f32 {
-        let raw = board.raw();
-        let mut total = 0.0f32;
-
+    /// Computes the 8 board orientations (D4 symmetry group).
+    #[inline(always)]
+    fn orientations(raw: u64) -> [u64; 8] {
         let r0 = raw;
         let r1 = Self::flip(r0);
         let r2 = Self::transpose(r1);
@@ -155,42 +152,28 @@ impl NTupleNetwork {
         let r5 = Self::flip(r4);
         let r6 = Self::transpose(r5);
         let r7 = Self::flip(r6);
+        [r0, r1, r2, r3, r4, r5, r6, r7]
+    }
 
-        total += self.evaluate_orientation(r0);
-        total += self.evaluate_orientation(r1);
-        total += self.evaluate_orientation(r2);
-        total += self.evaluate_orientation(r3);
-        total += self.evaluate_orientation(r4);
-        total += self.evaluate_orientation(r5);
-        total += self.evaluate_orientation(r6);
-        total += self.evaluate_orientation(r7);
-
+    /// Returns the total value estimate by evaluating all 8 board symmetries.
+    #[inline]
+    pub fn evaluate(&self, board: &Board) -> f32 {
+        let orientations = Self::orientations(board.raw());
+        let mut total = 0.0f32;
+        for &oriented in &orientations {
+            total += self.evaluate_orientation(oriented);
+        }
         total
     }
 
     /// Updates all patterns across all 8 symmetries.
     #[inline]
     pub fn update(&mut self, board: &Board, delta: f32) {
-        let raw = board.raw();
+        let orientations = Self::orientations(board.raw());
         let per_symmetry_delta = delta / (self.masks.len() * 8) as f32;
-
-        let r0 = raw;
-        let r1 = Self::flip(r0);
-        let r2 = Self::transpose(r1);
-        let r3 = Self::flip(r2);
-        let r4 = Self::transpose(r3);
-        let r5 = Self::flip(r4);
-        let r6 = Self::transpose(r5);
-        let r7 = Self::flip(r6);
-
-        self.update_orientation(r0, per_symmetry_delta);
-        self.update_orientation(r1, per_symmetry_delta);
-        self.update_orientation(r2, per_symmetry_delta);
-        self.update_orientation(r3, per_symmetry_delta);
-        self.update_orientation(r4, per_symmetry_delta);
-        self.update_orientation(r5, per_symmetry_delta);
-        self.update_orientation(r6, per_symmetry_delta);
-        self.update_orientation(r7, per_symmetry_delta);
+        for &oriented in &orientations {
+            self.update_orientation(oriented, per_symmetry_delta);
+        }
     }
 
     pub fn num_patterns(&self) -> usize {
