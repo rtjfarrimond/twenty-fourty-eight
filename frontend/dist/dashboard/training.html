@@ -34,15 +34,6 @@
             font-size: 14px;
         }
 
-        .status-bar select {
-            padding: 6px 10px;
-            border-radius: 6px;
-            border: 2px solid #bbada0;
-            font-size: 14px;
-            font-family: inherit;
-            background: #fff;
-        }
-
         .status-indicator {
             display: inline-block;
             width: 10px;
@@ -53,6 +44,7 @@
 
         .status-indicator.active { background: #6ab04c; }
         .status-indicator.complete { background: #bbada0; }
+        .status-indicator.connecting { background: #edc22e; }
 
         .config-bar {
             background: #bbada0;
@@ -153,20 +145,8 @@
 
     <div class="status-bar">
         <div id="status-text">
-            <span id="status-dot" class="status-indicator active"></span>
-            <span id="status-label">Loading...</span>
-        </div>
-        <div>
-            Refresh:
-            <select id="refresh-interval">
-                <option value="1000" selected>1s</option>
-                <option value="5000">5s</option>
-                <option value="10000">10s</option>
-                <option value="30000">30s</option>
-            </select>
-        </div>
-        <div>
-            Last update: <strong id="last-update">—</strong>
+            <span id="status-dot" class="status-indicator connecting"></span>
+            <span id="status-label">Connecting...</span>
         </div>
     </div>
 
@@ -201,86 +181,86 @@
     <script>
         let scoreChart = null;
         let tileChart = null;
-        let refreshTimer = null;
-        let trainingComplete = false;
+        let totalGames = null;
+        let evalData = [];
 
-        function createScoreChart(data) {
+        function createOrUpdateScoreChart() {
             const ctx = document.getElementById('score-chart').getContext('2d');
-            const config = {
-                type: 'line',
-                data: {
-                    labels: data.map(d => d.games_trained.toLocaleString()),
-                    datasets: [{
-                        label: 'Avg Score',
-                        data: data.map(d => d.avg_score),
-                        borderColor: '#8f7a66',
-                        backgroundColor: 'rgba(143,122,102,0.1)',
-                        fill: true,
-                        tension: 0.3,
-                    }, {
-                        label: 'Max Score',
-                        data: data.map(d => d.max_score),
-                        borderColor: '#edc22e',
-                        borderDash: [5, 5],
-                        fill: false,
-                        tension: 0.3,
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: { title: { display: true, text: 'Games Trained' } },
-                        y: { title: { display: true, text: 'Score' }, beginAtZero: true }
-                    }
-                }
+            const chartData = {
+                labels: evalData.map(d => d.games_trained.toLocaleString()),
+                datasets: [{
+                    label: 'Avg Score',
+                    data: evalData.map(d => d.avg_score),
+                    borderColor: '#8f7a66',
+                    backgroundColor: 'rgba(143,122,102,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                }, {
+                    label: 'Max Score',
+                    data: evalData.map(d => d.max_score),
+                    borderColor: '#edc22e',
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.3,
+                }]
             };
 
             if (scoreChart) {
-                scoreChart.data = config.data;
+                scoreChart.data = chartData;
                 scoreChart.update();
             } else {
-                scoreChart = new Chart(ctx, config);
+                scoreChart = new Chart(ctx, {
+                    type: 'line',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        scales: {
+                            x: { title: { display: true, text: 'Games Trained' } },
+                            y: { title: { display: true, text: 'Score' }, beginAtZero: true }
+                        }
+                    }
+                });
             }
         }
 
-        function createTileChart(data) {
+        function createOrUpdateTileChart() {
             const ctx = document.getElementById('tile-chart').getContext('2d');
-            const config = {
-                type: 'line',
-                data: {
-                    labels: data.map(d => d.games_trained.toLocaleString()),
-                    datasets: [
-                        { label: '2048', data: data.map(d => d.tile_2048_pct), borderColor: '#edc22e', tension: 0.3 },
-                        { label: '4096', data: data.map(d => d.tile_4096_pct), borderColor: '#f67c5f', tension: 0.3 },
-                        { label: '8192', data: data.map(d => d.tile_8192_pct), borderColor: '#f65e3b', tension: 0.3 },
-                        { label: '16384', data: data.map(d => d.tile_16384_pct), borderColor: '#edcf72', tension: 0.3 },
-                        { label: '32768', data: data.map(d => d.tile_32768_pct), borderColor: '#bbada0', tension: 0.3 },
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: { title: { display: true, text: 'Games Trained' } },
-                        y: { title: { display: true, text: '%' }, beginAtZero: true, max: 100 }
-                    }
-                }
+            const chartData = {
+                labels: evalData.map(d => d.games_trained.toLocaleString()),
+                datasets: [
+                    { label: '2048', data: evalData.map(d => d.tile_2048_pct), borderColor: '#edc22e', tension: 0.3 },
+                    { label: '4096', data: evalData.map(d => d.tile_4096_pct), borderColor: '#f67c5f', tension: 0.3 },
+                    { label: '8192', data: evalData.map(d => d.tile_8192_pct), borderColor: '#f65e3b', tension: 0.3 },
+                    { label: '16384', data: evalData.map(d => d.tile_16384_pct), borderColor: '#edcf72', tension: 0.3 },
+                    { label: '32768', data: evalData.map(d => d.tile_32768_pct), borderColor: '#bbada0', tension: 0.3 },
+                ]
             };
 
             if (tileChart) {
-                tileChart.data = config.data;
+                tileChart.data = chartData;
                 tileChart.update();
             } else {
-                tileChart = new Chart(ctx, config);
+                tileChart = new Chart(ctx, {
+                    type: 'line',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        scales: {
+                            x: { title: { display: true, text: 'Games Trained' } },
+                            y: { title: { display: true, text: '%' }, beginAtZero: true, max: 100 }
+                        }
+                    }
+                });
             }
         }
 
-        function updateStats(data) {
+        function updateStats() {
             const container = document.getElementById('stats');
-            if (data.length === 0) {
+            if (evalData.length === 0) {
                 container.innerHTML = '';
                 return;
             }
-            const latest = data[data.length - 1];
+            const latest = evalData[evalData.length - 1];
             container.innerHTML = `
                 <div class="stat"><div class="label">Games Trained</div><div class="value">${latest.games_trained.toLocaleString()}</div></div>
                 <div class="stat"><div class="label">Avg Score</div><div class="value">${Math.round(latest.avg_score).toLocaleString()}</div></div>
@@ -302,9 +282,9 @@
             `;
         }
 
-        function updateProgress(data, totalGames) {
-            if (!totalGames || data.length === 0) return;
-            const latest = data[data.length - 1];
+        function updateProgress() {
+            if (!totalGames || evalData.length === 0) return;
+            const latest = evalData[evalData.length - 1];
             const pct = Math.min(100, (latest.games_trained / totalGames) * 100);
 
             const bar = document.getElementById('progress');
@@ -314,78 +294,55 @@
             fill.textContent = pct.toFixed(1) + '%';
 
             if (latest.games_trained >= totalGames) {
-                trainingComplete = true;
                 document.getElementById('status-dot').className = 'status-indicator complete';
                 document.getElementById('status-label').textContent = 'Training complete';
-                if (refreshTimer) {
-                    clearInterval(refreshTimer);
-                    refreshTimer = null;
-                }
             } else {
                 document.getElementById('status-dot').className = 'status-indicator active';
                 document.getElementById('status-label').textContent = 'Training in progress';
             }
         }
 
-        let totalGames = null;
+        function connectStream() {
+            const source = new EventSource('/training/stream');
 
-        async function refresh() {
-            try {
-                // Load config if we haven't yet
-                if (!totalGames) {
-                    const configResp = await fetch('/training_config.json');
-                    if (configResp.ok) {
-                        const config = await configResp.json();
-                        totalGames = config.total_games;
-                        updateConfig(config);
-                    }
-                }
+            source.addEventListener('config', (event) => {
+                const config = JSON.parse(event.data);
+                totalGames = config.total_games;
+                updateConfig(config);
+            });
 
-                const response = await fetch('/training_log.jsonl');
-                if (!response.ok || !totalGames) {
-                    document.getElementById('no-training').style.display = 'block';
-                    document.getElementById('training-content').style.display = 'none';
-                    document.getElementById('status-dot').className = 'status-indicator complete';
-                    document.getElementById('status-label').textContent = 'No training in progress';
-                    return;
-                }
-                const text = await response.text();
-                const data = text.trim().split('\n')
-                    .filter(line => line.length > 0)
-                    .map(line => JSON.parse(line));
-
-                if (data.length === 0) {
-                    document.getElementById('no-training').style.display = 'block';
-                    document.getElementById('training-content').style.display = 'none';
-                    document.getElementById('status-dot').className = 'status-indicator active';
-                    document.getElementById('status-label').textContent = 'Waiting for first eval...';
-                    return;
-                }
+            source.addEventListener('eval', (event) => {
+                const entry = JSON.parse(event.data);
+                evalData.push(entry);
 
                 document.getElementById('no-training').style.display = 'none';
                 document.getElementById('training-content').style.display = 'block';
 
-                createScoreChart(data);
-                createTileChart(data);
-                updateStats(data);
-                updateProgress(data, totalGames);
-                document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
-            } catch (err) {
-                console.error('Failed to fetch training log:', err);
-            }
+                createOrUpdateScoreChart();
+                createOrUpdateTileChart();
+                updateStats();
+                updateProgress();
+            });
+
+            source.addEventListener('no-training', () => {
+                document.getElementById('no-training').style.display = 'block';
+                document.getElementById('training-content').style.display = 'none';
+                document.getElementById('status-dot').className = 'status-indicator complete';
+                document.getElementById('status-label').textContent = 'No training data found';
+            });
+
+            source.addEventListener('open', () => {
+                document.getElementById('status-dot').className = 'status-indicator active';
+                document.getElementById('status-label').textContent = 'Connected';
+            });
+
+            source.addEventListener('error', () => {
+                document.getElementById('status-dot').className = 'status-indicator connecting';
+                document.getElementById('status-label').textContent = 'Reconnecting...';
+            });
         }
 
-        function startRefreshLoop() {
-            if (trainingComplete) return;
-            if (refreshTimer) clearInterval(refreshTimer);
-            const interval = parseInt(document.getElementById('refresh-interval').value);
-            refreshTimer = setInterval(refresh, interval);
-        }
-
-        document.getElementById('refresh-interval').addEventListener('change', startRefreshLoop);
-
-        refresh();
-        startRefreshLoop();
+        connectStream();
     </script>
 </body>
 </html>

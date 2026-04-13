@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
+futures = "0.3"
 game-engine = { path = "../engine" }
 model = { path = "../model" }
 rand = "0.9"

@@ -4,6 +4,7 @@ mod model_registry;
 mod model_watcher;
 mod protocol;
 mod session;
+mod training_stream;
 mod websocket;
 
 use axum::Router;
@@ -83,10 +84,15 @@ async fn main() {
     });
 
     let training_dir = config.training_dir.clone();
+    let training_dir_sse = config.training_dir.clone();
     let frontend_dir = config.frontend_dir.clone();
 
     let app = Router::new()
         .route("/ws", get(websocket_handler))
+        .route(
+            "/training/stream",
+            get(move || training_stream::training_stream(training_dir_sse.clone())),
+        )
         .route(
             "/training_log.jsonl",
             get(move || serve_latest(training_dir.clone(), "log.jsonl", "application/jsonl")),
