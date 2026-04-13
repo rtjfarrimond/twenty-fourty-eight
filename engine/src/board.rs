@@ -10,6 +10,11 @@ impl Board {
         Self { state: 0 }
     }
 
+    /// Creates a board from a raw u64 state.
+    pub fn from_raw(raw: u64) -> Self {
+        Self { state: raw }
+    }
+
     /// Returns the raw u64 state for efficient comparison and hashing.
     pub fn raw(&self) -> u64 {
         self.state

@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn play_eval_game_completes_and_returns_score() {
         let tables = tables();
-        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3)]];
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
         let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
         let mut rng = rand::rng();
 
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn evaluate_returns_valid_percentages() {
         let tables = tables();
-        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3)]];
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
         let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
 
         let result = evaluate(&network, &tables, 10, 0);

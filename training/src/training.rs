@@ -1,6 +1,4 @@
-use game_engine::{
-    Board, Direction, MoveTables, apply_move, empty_tiles, is_game_over, spawn_tile,
-};
+use game_engine::{apply_move, empty_tiles, spawn_tile, Board, Direction, MoveTables};
 use rand::Rng;
 
 use crate::ntuple::NTupleNetwork;
@@ -12,34 +10,40 @@ const ALL_DIRECTIONS: [Direction; 4] = [
     Direction::Down,
 ];
 
-/// Result of evaluating a single move: the afterstate, reward, and direction.
+/// Result of evaluating a single move, with cached network value.
 struct MoveCandidate {
     afterstate: Board,
     reward: u32,
-    direction: Direction,
+    value: f32,
 }
 
 /// Finds the best move by evaluating all legal afterstates.
-/// Returns None if no legal move exists.
+/// Returns None if no legal move exists (game over).
+#[inline]
 fn best_afterstate(
     board: &Board,
     network: &NTupleNetwork,
     tables: &MoveTables,
 ) -> Option<MoveCandidate> {
-    ALL_DIRECTIONS
-        .iter()
-        .filter_map(|&direction| {
-            apply_move(board, direction, tables).map(|(afterstate, reward)| MoveCandidate {
-                afterstate,
-                reward,
-                direction,
-            })
-        })
-        .max_by(|candidate_a, candidate_b| {
-            let value_a = candidate_a.reward as f32 + network.evaluate(&candidate_a.afterstate);
-            let value_b = candidate_b.reward as f32 + network.evaluate(&candidate_b.afterstate);
-            value_a.partial_cmp(&value_b).unwrap()
-        })
+    let mut best: Option<MoveCandidate> = None;
+    let mut best_total = f32::NEG_INFINITY;
+
+    for &direction in &ALL_DIRECTIONS {
+        if let Some((afterstate, reward)) = apply_move(board, direction, tables) {
+            let value = network.evaluate(&afterstate);
+            let total = reward as f32 + value;
+            if total > best_total {
+                best_total = total;
+                best = Some(MoveCandidate {
+                    afterstate,
+                    reward,
+                    value,
+                });
+            }
+        }
+    }
+
+    best
 }
 
 /// Plays one complete game using the network for move selection,
@@ -55,35 +59,22 @@ pub fn train_one_game(
     board = spawn_random_tile(board, rng);
     let mut total_score: u32 = 0;
 
-    // Get first afterstate
     let Some(mut current) = best_afterstate(&board, network, tables) else {
         return 0;
     };
     total_score += current.reward;
 
     loop {
-        // Spawn a random tile after the move
         let next_board = spawn_random_tile(current.afterstate, rng);
 
-        // Check if game is over
-        if is_game_over(&next_board, tables) {
-            // Terminal update: V(terminal) = 0
-            let td_error = 0.0 - network.evaluate(&current.afterstate);
-            network.update(&current.afterstate, learning_rate * td_error);
-            break;
-        }
-
-        // Find best move from the new state
         let Some(next) = best_afterstate(&next_board, network, tables) else {
-            // No legal moves — terminal
-            let td_error = 0.0 - network.evaluate(&current.afterstate);
-            network.update(&current.afterstate, learning_rate * td_error);
+            // Game over — terminal update: V(terminal) = 0
+            network.update(&current.afterstate, learning_rate * -current.value);
             break;
         };
 
-        // TD(0) update: V(s) <- V(s) + α * [r' + V(s') - V(s)]
-        let td_error = next.reward as f32 + network.evaluate(&next.afterstate)
-            - network.evaluate(&current.afterstate);
+        // TD(0): V(s) <- V(s) + α * [r' + V(s') - V(s)]
+        let td_error = next.reward as f32 + next.value - current.value;
         network.update(&current.afterstate, learning_rate * td_error);
 
         total_score += next.reward;
@@ -105,6 +96,7 @@ fn spawn_random_tile(board: Board, rng: &mut impl Rng) -> Board {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ntuple::NTupleNetwork;
     use rand::SeedableRng;
 
     fn tables() -> MoveTables {
@@ -112,8 +104,7 @@ mod tests {
     }
 
     fn small_network() -> NTupleNetwork {
-        // Use a small pattern set for fast tests
-        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3)]];
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
         NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0)
     }
 
@@ -124,7 +115,6 @@ mod tests {
         let mut rng = rand::rng();
 
         let score = train_one_game(&mut network, &tables, 0.0025, &mut rng);
-        // A game should produce some score (merges happen)
         assert!(score > 0);
     }
 
@@ -138,7 +128,6 @@ mod tests {
         train_one_game(&mut network, &tables, 0.0025, &mut rng);
         let after_eval = network.evaluate(&Board::new());
 
-        // Weights should have changed
         assert_ne!(initial_eval, after_eval);
     }
 
@@ -181,7 +170,6 @@ mod tests {
         let network = small_network();
         let mut board = Board::new();
 
-        // Fill with non-mergeable values
         let values = [[1, 2, 3, 4], [5, 6, 7, 8], [1, 2, 3, 4], [5, 6, 7, 8]];
         for row in 0..4 {
             for col in 0..4 {
@@ -195,21 +183,17 @@ mod tests {
     #[test]
     fn best_afterstate_picks_highest_value_move() {
         let tables = tables();
-        let base_patterns = vec![vec![(0, 0)]];
-        let mut network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        let mut network = small_network();
 
         let mut board = Board::new();
         board.set_tile(0, 0, 1);
-        board.set_tile(0, 1, 1); // can merge left or right
+        board.set_tile(0, 1, 1);
 
-        // Train the network to prefer some moves over others
-        // by running a few games
         let mut rng = rand::rng();
         for _ in 0..50 {
             train_one_game(&mut network, &tables, 0.01, &mut rng);
         }
 
-        // Just verify it returns a valid candidate
         let candidate = best_afterstate(&board, &network, &tables);
         assert!(candidate.is_some());
     }
