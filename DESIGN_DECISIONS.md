@@ -186,3 +186,25 @@ artefacts with a retention policy. Training dashboard is a phase 1 deliverable.
 
 ---
 
+## 9. Implementation Milestones (Phase 1)
+
+**Milestone 1 — Play 2048 in the browser:**
+Game engine crate → server with user sessions → WASM frontend. Proves out the
+core game logic, websocket layer, and rendering end-to-end. Enables feedback on
+game feel before moving to model work.
+
+**Milestone 2 — Dummy model plays on live server:**
+Model format crate + Agent trait → trivial agent (random/heuristic) → server
+agent game loop with broadcast + configurable pacing. Proves the model-server
+interface before real training. "Take over" button working.
+
+**Milestone 3 — Training pipeline + dashboard:**
+Research SOTA → n-tuple TD(0) training → evaluation pipeline → training
+dashboard → swap dummy agent for trained model. User deploys to web in
+parallel.
+
+**Rationale:** End-to-end vertical slices over layer-by-layer. Catches
+integration issues early and produces something tangible at each milestone.
+
+---
+
