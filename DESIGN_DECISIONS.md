@@ -259,8 +259,64 @@ by a shared eval data format.
 
 ---
 
-**Remaining phase 1 items (unblocked after deployment):**
-- Mobile support: touch/swipe input handling (touchstart/touchend → direction)
+## 13. Hot Model Loading
+
+**Status:** Planned — next session.
+
+**Decision:** The server should watch the models directory for new `.bin` files
+using inotify (Linux file change notifications) and load them automatically
+without requiring a restart.
+
+**Details:**
+- Event-driven, not periodic scanning. Uses inotify to watch
+  `/var/lib/2048-solver/models/` for new files.
+- When a new `.bin` appears: load it, register it in the model registry, spin
+  up a new agent game loop, and make it available in the frontend dropdown.
+- The training binary should handle the full artefact lifecycle: train → save
+  `.bin` directly to the models directory → write `.meta.toml` → regenerate
+  `models.json`. No manual file moves or restarts required.
+
+---
+
+## 14. Reproducibility
+
+**Status:** Planned — next session.
+
+**Decision:** All existing models will be deleted and retrained from scratch to
+ensure full reproducibility with the current codebase.
+
+**Details:**
+- Every trained model must be reproducible from a documented command.
+- The training CLI currently uses positional arguments which is fragile and
+  hard to self-document. Switch to named flags (e.g. clap) so training configs
+  are explicit and old experiments can be re-run exactly.
+- Training parameters (learning rate, optimistic init value, pattern set,
+  number of games, eval interval) must all be captured in the output artefacts.
+
+---
+
+## 15. Deployment
+
+**Decision:** Follow Linux FHS conventions with system-level installation.
+
+**Layout:**
+- `/opt/2048-solver/bin/` — server, training, generate_models, benchmark
+- `/opt/2048-solver/frontend/` — static web assets (HTML, CSS, WASM)
+- `/etc/2048-solver/config.toml` — server configuration
+- `/var/lib/2048-solver/models/` — trained model `.bin` files + `.meta.toml`
+- `/var/lib/2048-solver/training/` — per-run training logs
+
+**Rationale:** This is a web server intended to run 24/7, not a desktop app.
+System-level installation (`/opt`, `/etc`, `/var`) is conventional for this
+use case. Requires `sudo` for deploy, which is acceptable.
+
+The server reads a config file (first CLI arg, or `/etc/2048-solver/config.toml`,
+or built-in defaults). Defaults point to relative dev paths so `cargo run` from
+the server directory works without any config for local development.
+
+---
+
+**Remaining polish items:**
 - Tile sliding animations (requires client-side state diffing)
 - Replace unicode arrow characters with SVG/icon font for consistent
   cross-device rendering (current padding hack is browser-specific)

@@ -1,0 +1,2 @@
+name = "ntuple-4x6-td0-1M-optinit"
+description = "N-tuple network (4 base 6-tuple patterns) trained with TD(0), afterstate value functions, and optimistic weight initialization (380K). 1M training games."

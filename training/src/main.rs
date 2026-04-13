@@ -45,6 +45,11 @@ fn main() {
         .nth(3)
         .unwrap_or_else(|| "ntuple-4x6-td0".to_string());
 
+    let optimistic_init: f32 = std::env::args()
+        .nth(4)
+        .and_then(|arg| arg.parse().ok())
+        .unwrap_or(0.0);
+
     let eval_games: u32 = 1000;
     let learning_rate: f32 = 0.0025;
     let log_path = format!("{model_name}.log.jsonl");
@@ -72,6 +77,7 @@ fn main() {
     println!("  Eval interval: {eval_interval}");
     println!("  Eval games per checkpoint: {eval_games}");
     println!("  Learning rate: {learning_rate}");
+    println!("  Optimistic init: {optimistic_init}");
     println!(
         "  Patterns: {} base x 8 symmetries = {}",
         patterns.len(),
@@ -82,7 +88,7 @@ fn main() {
     println!();
 
     let tables = MoveTables::new();
-    let mut network = NTupleNetwork::with_symmetry_expansion(&patterns, 0.0);
+    let mut network = NTupleNetwork::with_symmetry_expansion(&patterns, optimistic_init);
     let mut rng = rand::rng();
 
     let log_file = File::create(&log_path).expect("Failed to create log file");
