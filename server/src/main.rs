@@ -26,21 +26,33 @@ async fn main() {
 
     let mut registry = ModelRegistry::new();
 
-    // Register trained n-tuple model if available
-    let model_path = "../training/ntuple-4x6-td0-v1.bin";
-    match NTupleAgent::load(
-        model_path,
-        "ntuple-4x6-td0-v1",
-        "N-tuple network (4 base 6-tuple patterns) trained with TD(0) \
-         and afterstate value functions. 100K training games.",
-        tables.clone(),
-    ) {
-        Ok(agent) => {
-            println!("Loaded trained model: {}", agent.name());
-            registry.register(Arc::new(agent));
-        }
-        Err(err) => {
-            println!("No trained model at {model_path}: {err}");
+    // Register trained models (most trained first)
+    let models = [
+        (
+            "../training/ntuple-4x6-td0-1M.bin",
+            "ntuple-4x6-td0-1M",
+            "N-tuple network (4 base 6-tuple patterns) trained with TD(0) \
+             and afterstate value functions. 1M training games. \
+             Avg score ~35K, reaches 2048 in ~70% of games.",
+        ),
+        (
+            "../training/ntuple-4x6-td0-v1.bin",
+            "ntuple-4x6-td0-100K",
+            "N-tuple network (4 base 6-tuple patterns) trained with TD(0) \
+             and afterstate value functions. 100K training games. \
+             An early checkpoint showing the model learning.",
+        ),
+    ];
+
+    for (path, name, description) in models {
+        match NTupleAgent::load(path, name, description, tables.clone()) {
+            Ok(agent) => {
+                println!("Loaded trained model: {}", agent.name());
+                registry.register(Arc::new(agent));
+            }
+            Err(err) => {
+                println!("No trained model at {path}: {err}");
+            }
         }
     }
 

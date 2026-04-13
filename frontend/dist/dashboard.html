@@ -61,6 +61,10 @@
             margin-bottom: 30px;
         }
 
+        @media (max-width: 768px) {
+            .charts { grid-template-columns: 1fr; }
+        }
+
         .chart-container {
             background: #fff;
             border-radius: 6px;
@@ -78,6 +82,11 @@
             font-style: italic;
             padding: 40px;
             text-align: center;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            margin-bottom: 30px;
         }
 
         .comparison-table {
@@ -215,7 +224,7 @@
                 ['tile_32768_pct', '32768%'],
             ];
 
-            let html = '<table class="comparison-table"><tr>';
+            let html = '<div class="table-wrapper"><table class="comparison-table"><tr>';
             for (const [key, label] of columns) {
                 html += `<th class="sortable" onclick="handleSort('${key}')">${label}${sortIndicator(key)}</th>`;
             }
@@ -239,7 +248,7 @@
                 </tr>`;
             }
 
-            html += '</table>';
+            html += '</table></div>';
             container.innerHTML = html;
         }
 

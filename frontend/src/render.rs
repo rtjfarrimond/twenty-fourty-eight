@@ -27,12 +27,13 @@ fn text_color(value: u16) -> &'static str {
     if value <= 4 { "#776e65" } else { "#f9f6f2" }
 }
 
-fn font_size(value: u16) -> &'static str {
+fn font_class(value: u16) -> &'static str {
     match value {
-        0..=99 => "55px",
-        100..=999 => "45px",
-        1000..=9999 => "35px",
-        _ => "30px",
+        0..=9 => "digits-1",
+        10..=99 => "digits-2",
+        100..=999 => "digits-3",
+        1000..=9999 => "digits-4",
+        _ => "digits-5",
     }
 }
 
@@ -44,11 +45,11 @@ pub fn render_board(document: &Document, board: &[[u16; 4]; 4]) {
     for row in board {
         for &value in row {
             let tile = document.create_element("div").unwrap();
-            tile.set_class_name("tile");
+            let class = format!("tile {}", font_class(value));
+            tile.set_class_name(&class);
 
             let background = tile_color(value);
             let color = text_color(value);
-            let size = font_size(value);
             let display_text = if value == 0 {
                 String::new()
             } else {
@@ -56,7 +57,7 @@ pub fn render_board(document: &Document, board: &[[u16; 4]; 4]) {
             };
 
             let style = format!(
-                "background:{background};color:{color};font-size:{size};\
+                "background:{background};color:{color};\
                  display:flex;align-items:center;justify-content:center;\
                  border-radius:6px;font-weight:bold;"
             );

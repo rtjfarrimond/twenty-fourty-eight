@@ -42,3 +42,19 @@
 .nav-spacer {
     height: 48px;
 }
+
+@media (max-width: 768px) {
+    .site-nav {
+        padding: 0 15px;
+    }
+
+    .site-nav .nav-brand {
+        margin-right: 15px;
+        font-size: 16px;
+    }
+
+    .site-nav a {
+        font-size: 12px;
+        padding: 14px 10px;
+    }
+}
