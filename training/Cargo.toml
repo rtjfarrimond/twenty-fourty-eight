@@ -3,6 +3,9 @@ name = "training"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+debug = true
+
 [dependencies]
 game-engine = { path = "../engine" }
 model = { path = "../model" }

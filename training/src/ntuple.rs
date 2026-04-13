@@ -3,42 +3,80 @@ use game_engine::Board;
 /// The number of possible tile values (0=empty, 1=2, ..., 15=32768).
 const TILE_VALUES: usize = 16;
 
-/// A single n-tuple pattern: a list of board positions (row, col)
-/// and a weight table indexed by the combined tile values at those positions.
+/// Maximum tuple size supported.
+const MAX_TUPLE_SIZE: usize = 8;
+
+/// A single n-tuple pattern: stores precomputed bit-shift offsets in a
+/// fixed-size array for fast index extraction directly from the board's raw u64.
 pub struct TuplePattern {
-    positions: Vec<(usize, usize)>,
+    /// Bit-shift amounts for each position in the tuple.
+    shifts: [u32; MAX_TUPLE_SIZE],
+    /// How many positions are actually used.
+    tuple_size: usize,
     weights: Vec<f32>,
 }
 
 impl TuplePattern {
-    /// Creates a new tuple pattern with the given board positions.
-    /// All weights are initialized to the given value.
+    /// Creates a new tuple pattern from (row, col) positions.
     pub fn new(positions: Vec<(usize, usize)>, initial_weight: f32) -> Self {
+        assert!(positions.len() <= MAX_TUPLE_SIZE);
+        let mut shifts = [0u32; MAX_TUPLE_SIZE];
+        for (index, &(row, col)) in positions.iter().enumerate() {
+            shifts[index] = ((row * 4 + col) * 4) as u32;
+        }
         let table_size = TILE_VALUES.pow(positions.len() as u32);
         Self {
-            positions,
+            shifts,
+            tuple_size: positions.len(),
             weights: vec![initial_weight; table_size],
         }
     }
 
-    /// Computes the index into the weight table for the given board state.
-    fn index_for(&self, board: &Board) -> usize {
-        let mut index = 0;
-        for &(row, col) in &self.positions {
-            index = index * TILE_VALUES + board.get_tile(row, col) as usize;
+    /// Computes the weight table index directly from the raw board state.
+    /// Manually unrolled for the common case (6-tuples) to allow full
+    /// compiler optimization.
+    #[inline(always)]
+    fn index_for_raw(&self, raw: u64) -> usize {
+        match self.tuple_size {
+            6 => {
+                ((raw >> self.shifts[0]) as usize & 0xF) << 20
+                    | ((raw >> self.shifts[1]) as usize & 0xF) << 16
+                    | ((raw >> self.shifts[2]) as usize & 0xF) << 12
+                    | ((raw >> self.shifts[3]) as usize & 0xF) << 8
+                    | ((raw >> self.shifts[4]) as usize & 0xF) << 4
+                    | ((raw >> self.shifts[5]) as usize & 0xF)
+            }
+            _ => {
+                let mut index = 0usize;
+                for &shift in &self.shifts[..self.tuple_size] {
+                    index = (index << 4) | ((raw >> shift) as usize & 0xF);
+                }
+                index
+            }
         }
-        index
     }
 
-    /// Returns the weight (value estimate) for the given board state.
+    /// Returns the weight for the given raw board state.
+    #[inline(always)]
+    pub fn evaluate_raw(&self, raw: u64) -> f32 {
+        unsafe { *self.weights.get_unchecked(self.index_for_raw(raw)) }
+    }
+
+    /// Updates the weight for the given raw board state.
+    #[inline(always)]
+    pub fn update_raw(&mut self, raw: u64, delta: f32) {
+        let index = self.index_for_raw(raw);
+        unsafe { *self.weights.get_unchecked_mut(index) += delta; }
+    }
+
+    /// Returns the weight for the given board state.
     pub fn evaluate(&self, board: &Board) -> f32 {
-        self.weights[self.index_for(board)]
+        self.evaluate_raw(board.raw())
     }
 
-    /// Updates the weight for the given board state by the given delta.
+    /// Updates the weight for the given board state.
     pub fn update(&mut self, board: &Board, delta: f32) {
-        let index = self.index_for(board);
-        self.weights[index] += delta;
+        self.update_raw(board.raw(), delta);
     }
 
     /// Returns the number of entries in the weight table.
@@ -70,15 +108,19 @@ impl NTupleNetwork {
     }
 
     /// Returns the total value estimate for the given board state.
+    #[inline]
     pub fn evaluate(&self, board: &Board) -> f32 {
-        self.patterns.iter().map(|p| p.evaluate(board)).sum()
+        let raw = board.raw();
+        self.patterns.iter().map(|p| p.evaluate_raw(raw)).sum()
     }
 
     /// Updates all patterns for the given board state by delta / num_patterns.
+    #[inline]
     pub fn update(&mut self, board: &Board, delta: f32) {
+        let raw = board.raw();
         let per_pattern_delta = delta / self.patterns.len() as f32;
         for pattern in &mut self.patterns {
-            pattern.update(board, per_pattern_delta);
+            pattern.update_raw(raw, per_pattern_delta);
         }
     }
 
@@ -91,14 +133,14 @@ impl NTupleNetwork {
 /// Generates all 8 symmetries (D4 group) of a set of board positions.
 fn all_symmetries(positions: &[(usize, usize)]) -> Vec<Vec<(usize, usize)>> {
     let transforms: Vec<fn(usize, usize) -> (usize, usize)> = vec![
-        |row, col| (row, col),         // identity
-        |row, col| (col, 3 - row),     // 90° clockwise
-        |row, col| (3 - row, 3 - col), // 180°
-        |row, col| (3 - col, row),     // 270° clockwise
-        |row, col| (row, 3 - col),     // horizontal reflection
-        |row, col| (3 - col, 3 - row), // reflect + 90°
-        |row, col| (3 - row, col),     // vertical reflection
-        |row, col| (col, row),         // reflect + 270° (transpose)
+        |row, col| (row, col),             // identity
+        |row, col| (col, 3 - row),         // 90° clockwise
+        |row, col| (3 - row, 3 - col),     // 180°
+        |row, col| (3 - col, row),         // 270° clockwise
+        |row, col| (row, 3 - col),         // horizontal reflection
+        |row, col| (3 - col, 3 - row),     // reflect + 90°
+        |row, col| (3 - row, col),         // vertical reflection
+        |row, col| (col, row),             // reflect + 270° (transpose)
     ];
 
     transforms
@@ -131,12 +173,11 @@ mod tests {
         let mut board_b = Board::new();
         board_b.set_tile(0, 0, 2);
 
-        // Different tile values should yield different evaluations after update
         let mut pattern = TuplePattern::new(vec![(0, 0), (0, 1)], 0.0);
         pattern.update(&board_a, 10.0);
 
         assert_eq!(pattern.evaluate(&board_a), 10.0);
-        assert_eq!(pattern.evaluate(&board_b), 0.0); // different index
+        assert_eq!(pattern.evaluate(&board_b), 0.0);
     }
 
     #[test]
@@ -147,8 +188,6 @@ mod tests {
 
         pattern.update(&board, 5.0);
         assert_eq!(pattern.evaluate(&board), 5.0);
-
-        // Empty board uses different index
         assert_eq!(pattern.evaluate(&Board::new()), 0.0);
     }
 
@@ -177,8 +216,6 @@ mod tests {
     fn network_evaluate_sums_all_patterns() {
         let base_patterns = vec![vec![(0, 0)]];
         let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 10.0);
-
-        // 8 symmetries of a single position, each evaluating to 10.0
         let board = Board::new();
         assert_eq!(network.evaluate(&board), 80.0);
     }
@@ -190,7 +227,7 @@ mod tests {
             vec![(1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1)],
         ];
         let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
-        assert_eq!(network.num_patterns(), 16); // 2 base x 8 symmetries
+        assert_eq!(network.num_patterns(), 16);
     }
 
     #[test]
@@ -200,7 +237,6 @@ mod tests {
         let board = Board::new();
 
         network.update(&board, 80.0);
-        // 80.0 / 8 patterns = 10.0 per pattern
         assert_eq!(network.evaluate(&board), 80.0);
     }
 }
