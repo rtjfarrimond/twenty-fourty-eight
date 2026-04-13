@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type")]
 pub enum ClientMessage {
     NewGame,
+    ResumeGame,
     Move { direction: ClientDirection },
     WatchAgent { model: String },
     ListModels,

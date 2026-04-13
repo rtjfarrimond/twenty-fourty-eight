@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type")]
 pub enum ClientMessage {
     NewGame,
+    ResumeGame,
     Move { direction: String },
     WatchAgent { model: String },
 }
@@ -44,6 +45,10 @@ impl ClientMessage {
             direction: direction.to_string(),
         })
         .unwrap()
+    }
+
+    pub fn resume_game() -> String {
+        serde_json::to_string(&ClientMessage::ResumeGame).unwrap()
     }
 
     pub fn watch_agent(model: &str) -> String {

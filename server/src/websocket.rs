@@ -110,9 +110,7 @@ async fn handle_client_message(
             models: state.model_registry.list(),
         }),
         Ok(ClientMessage::WatchAgent { model }) => {
-            if let Some(old_id) = session_id.take() {
-                state.session_manager.lock().await.remove_session(&old_id);
-            }
+            // Keep the session alive — user can resume later
             match state.model_registry.get(&model) {
                 Some(registered) => {
                     *agent_receiver = Some(registered.sender.subscribe());
@@ -121,6 +119,42 @@ async fn handle_client_message(
                 None => Some(ServerMessage::Error {
                     message: format!("Unknown model: {model}"),
                 }),
+            }
+        }
+        Ok(ClientMessage::ResumeGame) => {
+            *agent_receiver = None;
+
+            match session_id.as_ref() {
+                Some(current_id) => {
+                    let manager = state.session_manager.lock().await;
+                    let session = manager.get_session(current_id).unwrap();
+                    let board = board_to_tile_values(&session.board);
+                    let score = session.score;
+                    let last_move = session.last_move.map(|d| direction_to_string(&d));
+                    let game_over = manager.is_game_over(current_id);
+
+                    Some(ServerMessage::GameState {
+                        board,
+                        score,
+                        game_over,
+                        last_move,
+                    })
+                }
+                None => {
+                    // No existing session — create a new one
+                    let mut manager = state.session_manager.lock().await;
+                    let (new_id, session) = manager.create_session();
+                    let board = board_to_tile_values(&session.board);
+                    let score = session.score;
+                    *session_id = Some(new_id);
+
+                    Some(ServerMessage::GameState {
+                        board,
+                        score,
+                        game_over: false,
+                        last_move: None,
+                    })
+                }
             }
         }
         Ok(ClientMessage::NewGame) => {

@@ -60,12 +60,12 @@ pub fn connect() {
         .unwrap();
     on_keydown.forget();
 
-    // Play button → switch to playing mode
+    // Play button → switch to playing mode, resuming existing game if any
     let ws_for_play = websocket.clone();
     let doc_for_play = document.clone();
     if let Some(button) = document.get_element_by_id("play-btn") {
         let on_click = Closure::wrap(Box::new(move |_: JsValue| {
-            ws_for_play.send_with_str(&ClientMessage::new_game()).unwrap();
+            ws_for_play.send_with_str(&ClientMessage::resume_game()).unwrap();
             render::set_mode(&doc_for_play, false);
         }) as Box<dyn FnMut(JsValue)>);
         button

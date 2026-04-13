@@ -11,6 +11,7 @@ use uuid::Uuid;
 pub struct GameSession {
     pub board: Board,
     pub score: u32,
+    pub last_move: Option<Direction>,
     pub last_activity: Instant,
 }
 
@@ -45,6 +46,7 @@ impl SessionManager {
         let session = GameSession {
             board,
             score: 0,
+            last_move: None,
             last_activity: Instant::now(),
         };
 
@@ -72,6 +74,7 @@ impl SessionManager {
 
         session.board = board_with_spawn;
         session.score += move_score;
+        session.last_move = Some(direction);
 
         Some(session)
     }
