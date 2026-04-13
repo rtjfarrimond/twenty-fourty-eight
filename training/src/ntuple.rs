@@ -1,113 +1,37 @@
 use game_engine::Board;
 
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::_pext_u64;
+
 /// The number of possible tile values (0=empty, 1=2, ..., 15=32768).
 const TILE_VALUES: usize = 16;
 
-/// Describes how to extract a 6-tuple index from a raw board u64 using
-/// at most two mask+shift operations. This works for patterns where tiles
-/// come from at most two contiguous groups within the u64.
-struct IndexExtractor {
-    /// Mask for the first group of bits.
-    mask_a: u64,
-    /// Mask for the second group (0 if single group).
-    mask_b: u64,
-    /// Right-shift to bring group A down to bit 0.
-    shift_a: u32,
-    /// Additional right-shift to close the gap between groups A and B.
-    shift_b: u32,
+/// Extracts scattered bits from `source` selected by `mask` into a
+/// contiguous result. Uses BMI2 PEXT when available.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn pext(source: u64, mask: u64) -> u64 {
+    unsafe { _pext_u64(source, mask) }
 }
 
-impl IndexExtractor {
-    /// Builds an extractor for the given cell positions (flat indices 0-15).
-    /// The positions are expected to already be sorted.
-    fn new(positions: &[usize; 6]) -> Self {
-        // Compute the bitmask for each position's nibble
-        // and figure out how to pack them into a contiguous index.
-        //
-        // For positions that are consecutive in the u64 (e.g. 0,1,2 = bits 0-11),
-        // we can extract them with a single mask.
-        // For positions that span a gap, we need two masks and a shift.
-
-        // Build a mapping: for each position, what nibble offset is it in the u64?
-        let bit_positions: Vec<u32> = positions.iter().map(|&p| (p as u32) * 4).collect();
-
-        // Find groups of consecutive nibbles
-        // Group boundary: when bit_positions[i] != bit_positions[i-1] + 4
-        let mut groups: Vec<(u32, u32, usize)> = Vec::new(); // (start_bit, end_bit, count)
-        let mut group_start = bit_positions[0];
-        let mut group_count: usize = 1;
-
-        for window in bit_positions.windows(2) {
-            if window[1] == window[0] + 4 {
-                group_count += 1;
-            } else {
-                groups.push((group_start, group_start + (group_count as u32) * 4, group_count));
-                group_start = window[1];
-                group_count = 1;
-            }
-        }
-        groups.push((group_start, group_start + (group_count as u32) * 4, group_count));
-
-        match groups.len() {
-            1 => {
-                // All positions are consecutive — single mask
-                let bits = groups[0].2 * 4;
-                let mask = ((1u64 << bits) - 1) << groups[0].0;
-                Self {
-                    mask_a: mask,
-                    mask_b: 0,
-                    shift_a: groups[0].0,
-                    shift_b: 0,
-                }
-            }
-            2 => {
-                // Two groups — extract both and pack contiguously from bit 0.
-                // Group A starts at groups[0].0, group B starts at groups[1].0.
-                // We shift A down to bit 0, and B down so it sits above A.
-                let bits_a = groups[0].2 * 4;
-                let mask_a = ((1u64 << bits_a) - 1) << groups[0].0;
-                let mask_b = ((1u64 << (groups[1].2 * 4)) - 1) << groups[1].0;
-                Self {
-                    mask_a,
-                    mask_b,
-                    shift_a: groups[0].0,
-                    shift_b: groups[1].0 - groups[0].0 - bits_a as u32,
-                }
-            }
-            _ => {
-                // Fallback for complex patterns — use a general approach
-                // For now, assert we only handle 1-2 groups
-                panic!(
-                    "Pattern positions form {} groups; only 1-2 supported. \
-                     Positions: {:?}",
-                    groups.len(),
-                    positions
-                );
-            }
-        }
+/// Builds the PEXT mask for a set of board positions.
+/// Each position (flat index 0-15) contributes 4 bits (one nibble) to the mask.
+fn build_pext_mask(positions: &[usize]) -> u64 {
+    let mut mask: u64 = 0;
+    for &position in positions {
+        mask |= 0xF_u64 << (position * 4);
     }
-
-    /// Extracts the tuple index from a raw board state.
-    #[inline(always)]
-    fn extract(&self, raw: u64) -> usize {
-        if self.mask_b == 0 {
-            ((raw & self.mask_a) >> self.shift_a) as usize
-        } else {
-            let part_a = (raw & self.mask_a) >> self.shift_a;
-            let part_b = (raw & self.mask_b) >> (self.shift_a + self.shift_b);
-            (part_a | part_b) as usize
-        }
-    }
+    mask
 }
 
-/// An n-tuple network using the isomorphic evaluation approach:
+/// An n-tuple network using the isomorphic evaluation approach with BMI2 PEXT:
 /// - Stores only the base patterns (no symmetry expansion in weights)
 /// - At evaluation time, transforms the board 8 ways using fast bitwise ops
-/// - Evaluates each base pattern against each transformed board
+/// - Extracts tuple indices with a single PEXT instruction per pattern
 pub struct NTupleNetwork {
-    /// One extractor per base pattern.
-    extractors: Vec<IndexExtractor>,
-    /// Flat weight storage: extractors.len() contiguous weight tables.
+    /// One PEXT mask per base pattern.
+    masks: Vec<u64>,
+    /// Flat weight storage: masks.len() contiguous weight tables.
     weights: Vec<f32>,
     /// Size of each weight table (16^6 for 6-tuples).
     table_size: usize,
@@ -118,36 +42,27 @@ impl NTupleNetwork {
         base_patterns: &[Vec<(usize, usize)>],
         initial_weight: f32,
     ) -> Self {
+        assert!(
+            base_patterns.iter().all(|p| p.len() == 6),
+            "Only 6-tuple patterns are supported"
+        );
         let table_size = TILE_VALUES.pow(6);
-        let mut extractors = Vec::with_capacity(base_patterns.len());
-
-        for pattern in base_patterns {
-            assert_eq!(pattern.len(), 6, "Only 6-tuple patterns are supported");
-            let mut flat: [usize; 6] = [0; 6];
-            for (index, &(row, col)) in pattern.iter().enumerate() {
-                flat[index] = row * 4 + col;
-            }
-            flat.sort();
-            extractors.push(IndexExtractor::new(&flat));
-        }
+        let masks: Vec<u64> = base_patterns
+            .iter()
+            .map(|pattern| {
+                let flat: Vec<usize> = pattern.iter().map(|&(row, col)| row * 4 + col).collect();
+                build_pext_mask(&flat)
+            })
+            .collect();
 
         let total_weights = base_patterns.len() * table_size;
         let weights = vec![initial_weight; total_weights];
 
         Self {
-            extractors,
+            masks,
             weights,
             table_size,
         }
-    }
-
-    /// Fast bitwise mirror (reverse columns): swap cols 0<->3, 1<->2.
-    #[inline(always)]
-    fn mirror(raw: u64) -> u64 {
-        ((raw & 0x000f000f000f000f) << 12)
-            | ((raw & 0x00f000f000f000f0) << 4)
-            | ((raw & 0x0f000f000f000f00) >> 4)
-            | ((raw & 0xf000f000f000f000) >> 12)
     }
 
     /// Fast bitwise flip (reverse rows): swap rows 0<->3, 1<->2.
@@ -158,15 +73,13 @@ impl NTupleNetwork {
     }
 
     /// Fast bitwise transpose: swap (row,col) with (col,row).
-    /// Uses the delta-swap approach from the reference implementation.
     #[inline(always)]
     fn transpose(raw: u64) -> u64 {
         let a = raw;
         let t = (a ^ (a >> 12)) & 0x0000f0f00000f0f0;
         let a = a ^ t ^ (t << 12);
         let t = (a ^ (a >> 24)) & 0x00000000ff00ff00;
-        let a = a ^ t ^ (t << 24);
-        a
+        a ^ t ^ (t << 24)
     }
 
     /// Evaluate base patterns against a single board orientation.
@@ -174,15 +87,9 @@ impl NTupleNetwork {
     fn evaluate_orientation(&self, raw: u64) -> f32 {
         let weights_ptr = self.weights.as_ptr();
         let mut total = 0.0f32;
-        for (pattern_index, extractor) in self.extractors.iter().enumerate() {
-            let index = extractor.extract(raw);
-            debug_assert!(
-                index < self.table_size,
-                "Index {} out of bounds (table_size {}), pattern {}",
-                index, self.table_size, pattern_index
-            );
+        for (pattern_index, &mask) in self.masks.iter().enumerate() {
+            let index = pext(raw, mask) as usize;
             let offset = pattern_index * self.table_size + index;
-            debug_assert!(offset < self.weights.len());
             unsafe {
                 total += *weights_ptr.add(offset);
             }
@@ -194,8 +101,8 @@ impl NTupleNetwork {
     #[inline(always)]
     fn update_orientation(&mut self, raw: u64, delta: f32) {
         let weights_ptr = self.weights.as_mut_ptr();
-        for (pattern_index, extractor) in self.extractors.iter().enumerate() {
-            let index = extractor.extract(raw);
+        for (pattern_index, &mask) in self.masks.iter().enumerate() {
+            let index = pext(raw, mask) as usize;
             let offset = pattern_index * self.table_size + index;
             unsafe {
                 *weights_ptr.add(offset) += delta;
@@ -209,7 +116,6 @@ impl NTupleNetwork {
         let raw = board.raw();
         let mut total = 0.0f32;
 
-        // 8 isomorphisms via flip and transpose
         let r0 = raw;
         let r1 = Self::flip(r0);
         let r2 = Self::transpose(r1);
@@ -235,7 +141,7 @@ impl NTupleNetwork {
     #[inline]
     pub fn update(&mut self, board: &Board, delta: f32) {
         let raw = board.raw();
-        let per_symmetry_delta = delta / (self.extractors.len() * 8) as f32;
+        let per_symmetry_delta = delta / (self.masks.len() * 8) as f32;
 
         let r0 = raw;
         let r1 = Self::flip(r0);
@@ -257,7 +163,7 @@ impl NTupleNetwork {
     }
 
     pub fn num_patterns(&self) -> usize {
-        self.extractors.len() * 8
+        self.masks.len() * 8
     }
 }
 
@@ -266,11 +172,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pext_extracts_correct_bits() {
+        // Board with tile exponent 5 at position (0,0) and 3 at position (0,1)
+        let mut board = Board::new();
+        board.set_tile(0, 0, 5);
+        board.set_tile(0, 1, 3);
+        let raw = board.raw();
+
+        // Mask selecting positions 0 and 1 (bits 0-7)
+        let mask = build_pext_mask(&[0, 1]);
+        let result = pext(raw, mask);
+        // Should extract nibbles: position 0 = 5, position 1 = 3
+        // PEXT extracts low bits first: result = 0x35
+        assert_eq!(result, 0x35);
+    }
+
+    #[test]
+    fn pext_mask_for_scattered_positions() {
+        // Positions 0, 2, 5 → nibbles at bits 0-3, 8-11, 20-23
+        let mask = build_pext_mask(&[0, 2, 5]);
+        assert_eq!(mask, 0x00F00F0F);
+    }
+
+    #[test]
     fn network_evaluate_sums_all_patterns() {
         let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
         let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 10.0);
         let board = Board::new();
-        // 1 base pattern x 8 symmetries x 10.0 = 80.0
         assert_eq!(network.evaluate(&board), 80.0);
     }
 
@@ -289,7 +217,6 @@ mod tests {
         let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
         let mut network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
 
-        // Use a non-symmetric board so different orientations hit different entries
         let mut board = Board::new();
         board.set_tile(0, 0, 1);
         board.set_tile(1, 1, 2);
@@ -315,17 +242,6 @@ mod tests {
         network.update(&board_a, 80.0);
         assert!(network.evaluate(&board_a) > 0.0);
         assert_ne!(network.evaluate(&board_a), network.evaluate(&board_b));
-    }
-
-    #[test]
-    fn mirror_reverses_columns() {
-        let mut board = Board::new();
-        board.set_tile(0, 0, 1);
-        board.set_tile(0, 3, 2);
-        let mirrored = NTupleNetwork::mirror(board.raw());
-        let result = Board::from_raw(mirrored);
-        assert_eq!(result.get_tile(0, 3), 1);
-        assert_eq!(result.get_tile(0, 0), 2);
     }
 
     #[test]

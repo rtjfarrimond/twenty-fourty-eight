@@ -1,6 +1,26 @@
 # Benchmarking & Profiling
 
-## Prerequisites
+## Hardware Requirements
+
+The training crate uses BMI2 `PEXT` instructions for fast n-tuple index
+extraction. This requires:
+- **x86_64** architecture
+- **Intel Haswell (2013)** or later, or **AMD Zen 3 (2020)** or later
+
+Note: AMD Zen 1/2 have BMI2 but implement PEXT in microcode (~18 cycles vs
+1 cycle on Intel/Zen 3+). Performance will be significantly worse on those
+CPUs.
+
+The build is configured with `target-cpu=native` (see `.cargo/config.toml`)
+which enables the host CPU's full instruction set. Binaries are **not
+portable** across different CPU generations.
+
+To verify your CPU supports BMI2:
+```sh
+grep -o 'bmi2' /proc/cpuinfo | head -1
+```
+
+## Profiling Prerequisites
 
 ```sh
 sudo apt install linux-tools-common linux-tools-$(uname -r)
@@ -58,14 +78,20 @@ Config: 4 base 6-tuple patterns x 8 symmetries = 32 patterns.
 | + value caching, no redundant evals | 1,697 | 343K | 2.2x |
 | + flat weight array | 2,084 | 311K | 2.0x |
 | + isomorphic eval (transform board, not patterns) | 2,666 | 734K | 4.8x |
+| + BMI2 PEXT index extraction | 4,136 | 1.01M | 6.6x |
 
-The isomorphic approach was the breakthrough: store only 4 base patterns
-instead of 32 expanded ones (4x less memory = better cache), transform the
-board with fast bitwise flip/transpose, and use bitmask-based index extraction
-(2 ops per pattern vs 6 shifts).
+Key optimizations (in order of impact):
+1. **Isomorphic evaluation** — store 4 base patterns, transform the board 8
+   ways with bitwise flip/transpose. 4x less memory = better cache.
+2. **BMI2 PEXT** — single-instruction index extraction replaces multi-op
+   bitmask approach.
+3. **Value caching** — cache network evaluation alongside move candidates to
+   eliminate redundant evaluations.
+4. **Eliminated redundant game-over checks** — `best_afterstate` returning
+   `None` already signals game over.
 
-Target: 102M moves/sec (moporgic/TDL2048). Current gap: ~140x. Remaining
-optimizations: compile-time pattern specialization, BMI2 pext64, further loop
-unrolling, and possible SIMD.
+Target: 102M moves/sec (moporgic/TDL2048). Current gap: ~100x. Remaining
+optimizations: compile-time pattern specialization, further loop unrolling,
+multithreading, and possible SIMD.
 
 Hardware: (record your own)
