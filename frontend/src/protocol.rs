@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum ClientMessage {
     NewGame,
     Move { direction: String },
+    WatchAgent,
 }
 
 /// Messages received from the server.
@@ -32,5 +33,9 @@ impl ClientMessage {
             direction: direction.to_string(),
         })
         .unwrap()
+    }
+
+    pub fn watch_agent() -> String {
+        serde_json::to_string(&ClientMessage::WatchAgent).unwrap()
     }
 }

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum ClientMessage {
     NewGame,
     Move { direction: ClientDirection },
+    WatchAgent,
 }
 
 /// Direction as received from the client (serialization-friendly).

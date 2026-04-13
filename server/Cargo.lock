@@ -461,6 +461,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "model"
+version = "0.1.0"
+dependencies = [
+ "game-engine",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -684,6 +691,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "game-engine",
+ "model",
  "rand",
  "serde",
  "serde_json",

@@ -19,10 +19,10 @@ pub fn connect() {
 
     let websocket = WebSocket::new(&ws_url).unwrap();
 
-    // On open: send NewGame
+    // On open: start watching the agent
     let ws_clone = websocket.clone();
     let on_open = Closure::wrap(Box::new(move |_: JsValue| {
-        let message = ClientMessage::new_game();
+        let message = ClientMessage::watch_agent();
         ws_clone.send_with_str(&message).unwrap();
     }) as Box<dyn FnMut(JsValue)>);
     websocket.set_onopen(Some(on_open.as_ref().unchecked_ref()));
@@ -60,11 +60,24 @@ pub fn connect() {
         .unwrap();
     on_keydown.forget();
 
-    // New game button
+    // New game button (take over from agent)
     if let Some(button) = document.get_element_by_id("new-game-btn") {
         let on_click = Closure::wrap(Box::new(move |_: JsValue| {
             let message = ClientMessage::new_game();
             ws_for_new_game.send_with_str(&message).unwrap();
+        }) as Box<dyn FnMut(JsValue)>);
+        button
+            .add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())
+            .unwrap();
+        on_click.forget();
+    }
+
+    // Watch agent button
+    let ws_for_watch = websocket.clone();
+    if let Some(button) = document.get_element_by_id("watch-agent-btn") {
+        let on_click = Closure::wrap(Box::new(move |_: JsValue| {
+            let message = ClientMessage::watch_agent();
+            ws_for_watch.send_with_str(&message).unwrap();
         }) as Box<dyn FnMut(JsValue)>);
         button
             .add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())
