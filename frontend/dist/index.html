@@ -67,12 +67,49 @@
             background: #9f8b77;
         }
 
+        .game-area {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+
         .board {
             position: relative;
             background: #bbada0;
             border-radius: 6px;
             padding: 12px;
             display: inline-block;
+        }
+
+        .last-move-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 80px;
+        }
+
+        .last-move-container .label {
+            font-size: 13px;
+            text-transform: uppercase;
+            color: #776e65;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        #last-move {
+            font-size: 48px;
+            line-height: 1;
+            color: #f9f6f2;
+            background: #8f7a66;
+            border-radius: 6px;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding-bottom: 9px;
         }
 
         #grid {
@@ -122,9 +159,15 @@
             <button id="watch-agent-btn">Watch Agent</button>
             <button id="new-game-btn">Play</button>
         </div>
-        <div class="board">
-            <div id="grid"></div>
-            <div id="game-over">Game Over</div>
+        <div class="game-area">
+            <div class="board">
+                <div id="grid"></div>
+                <div id="game-over">Game Over</div>
+            </div>
+            <div class="last-move-container">
+                <div class="label">Last move</div>
+                <div id="last-move"></div>
+            </div>
         </div>
         <p class="instructions">Use arrow keys to play</p>
     </div>

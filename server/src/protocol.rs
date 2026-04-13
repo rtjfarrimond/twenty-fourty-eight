@@ -11,7 +11,7 @@ pub enum ClientMessage {
 }
 
 /// Direction as received from the client (serialization-friendly).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ClientDirection {
     Up,
@@ -39,10 +39,21 @@ pub enum ServerMessage {
         board: [[u16; 4]; 4],
         score: u32,
         game_over: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_move: Option<String>,
     },
     Error {
         message: String,
     },
+}
+
+pub fn direction_to_string(direction: &game_engine::Direction) -> String {
+    match direction {
+        game_engine::Direction::Up => "up".to_string(),
+        game_engine::Direction::Down => "down".to_string(),
+        game_engine::Direction::Left => "left".to_string(),
+        game_engine::Direction::Right => "right".to_string(),
+    }
 }
 
 /// Converts a game engine Board into the 2D array of tile face values
@@ -110,6 +121,7 @@ mod tests {
             board: [[0; 4]; 4],
             score: 100,
             game_over: false,
+            last_move: Some("up".to_string()),
         };
         let json = serde_json::to_string(&message).unwrap();
         assert!(json.contains("\"type\":\"GameState\""));

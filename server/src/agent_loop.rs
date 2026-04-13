@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time;
 
-use crate::protocol::{ServerMessage, board_to_tile_values};
+use crate::protocol::{ServerMessage, board_to_tile_values, direction_to_string};
 
 /// Runs the agent game loop, broadcasting state after each move.
 /// When the game ends, starts a new one automatically.
@@ -20,7 +20,7 @@ pub async fn run_agent_loop(
         let mut board = spawn_initial_tiles(Board::new());
         let mut score: u32 = 0;
 
-        broadcast_state(&sender, &board, score, false);
+        broadcast_state(&sender, &board, score, false, None);
 
         while !is_game_over(&board, &tables) {
             time::sleep(move_interval).await;
@@ -32,7 +32,7 @@ pub async fn run_agent_loop(
             }
 
             let game_over = is_game_over(&board, &tables);
-            broadcast_state(&sender, &board, score, game_over);
+            broadcast_state(&sender, &board, score, game_over, Some(&direction));
         }
 
         // Pause briefly before starting a new game
@@ -60,11 +60,18 @@ fn spawn_random_tile(board: Board) -> Board {
     spawn_tile(&board, position.0, position.1, rng.random::<f64>())
 }
 
-fn broadcast_state(sender: &broadcast::Sender<String>, board: &Board, score: u32, game_over: bool) {
+fn broadcast_state(
+    sender: &broadcast::Sender<String>,
+    board: &Board,
+    score: u32,
+    game_over: bool,
+    direction: Option<&game_engine::Direction>,
+) {
     let message = ServerMessage::GameState {
         board: board_to_tile_values(board),
         score,
         game_over,
+        last_move: direction.map(direction_to_string),
     };
     if let Ok(json) = serde_json::to_string(&message) {
         // Ignore send errors — just means no watchers are connected

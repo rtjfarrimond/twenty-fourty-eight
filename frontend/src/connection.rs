@@ -92,10 +92,12 @@ fn handle_server_message(document: &web_sys::Document, data: &str) {
             board,
             score,
             game_over,
+            last_move,
         }) => {
             render::render_board(document, &board);
             render::render_score(document, score);
             render::render_game_over(document, game_over);
+            render::render_last_move(document, &last_move);
         }
         Ok(ServerMessage::Error { message }) => {
             web_sys::console::error_1(&message.into());

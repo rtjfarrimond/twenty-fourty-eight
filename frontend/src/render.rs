@@ -84,3 +84,17 @@ pub fn render_game_over(document: &Document, game_over: bool) {
             .unwrap();
     }
 }
+
+/// Displays the last move as an arrow symbol.
+pub fn render_last_move(document: &Document, last_move: &Option<String>) {
+    if let Some(element) = document.get_element_by_id("last-move") {
+        let arrow = match last_move.as_deref() {
+            Some("up") => "\u{2191}",
+            Some("down") => "\u{2193}",
+            Some("left") => "\u{2190}",
+            Some("right") => "\u{2192}",
+            _ => "",
+        };
+        element.set_text_content(Some(arrow));
+    }
+}

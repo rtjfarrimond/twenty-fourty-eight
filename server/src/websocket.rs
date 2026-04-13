@@ -4,7 +4,7 @@ use axum::response::IntoResponse;
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
 
-use crate::protocol::{ClientMessage, ServerMessage, board_to_tile_values};
+use crate::protocol::{ClientMessage, ServerMessage, board_to_tile_values, direction_to_string};
 use crate::session::SessionManager;
 
 pub struct AppState {
@@ -122,6 +122,7 @@ async fn handle_client_message(
                 board,
                 score,
                 game_over: false,
+                last_move: None,
             })
         }
         Ok(ClientMessage::Move { direction }) => {
@@ -131,8 +132,9 @@ async fn handle_client_message(
                 });
             };
 
+            let engine_direction = game_engine::Direction::from(direction);
             let mut manager = state.session_manager.lock().await;
-            manager.apply_move(current_id, direction.into());
+            manager.apply_move(current_id, engine_direction);
 
             let session = manager.get_session(current_id).unwrap();
             let board = board_to_tile_values(&session.board);
@@ -143,6 +145,7 @@ async fn handle_client_message(
                 board,
                 score,
                 game_over,
+                last_move: Some(direction_to_string(&engine_direction)),
             })
         }
         Err(err) => Some(ServerMessage::Error {

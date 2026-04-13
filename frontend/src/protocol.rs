@@ -17,6 +17,8 @@ pub enum ServerMessage {
         board: [[u16; 4]; 4],
         score: u32,
         game_over: bool,
+        #[serde(default)]
+        last_move: Option<String>,
     },
     Error {
         message: String,
