@@ -176,11 +176,7 @@ artefacts with a retention policy. Training dashboard is a phase 1 deliverable.
   weight tables can be large (hundreds of MB to a few GB), so a retention
   policy is needed — keep the best K checkpoints and every Nth, discard the
   rest.
-- **Training Dashboard:** A lightweight web UI (separate from the game-playing
-  frontend) that reads training logs (JSON/CSV) and plots score progression,
-  tile-reach percentages, and loss curves over time. This is on the critical
-  path for phase 1 — it is part of the product and must be in place and
-  validated during phase 1 training, not added retroactively.
+- **Dashboards:** See section 11 for full dashboard architecture.
 - **Note:** User's wife (RL expert) joining at phase 2 — evaluation pipeline
   should be solid and well-documented by then.
 
@@ -205,6 +201,63 @@ parallel.
 
 **Rationale:** End-to-end vertical slices over layer-by-layer. Catches
 integration issues early and produces something tangible at each milestone.
+
+---
+
+## 11. Dashboard Architecture
+
+**Decision:** Two distinct dashboard views serving different concerns, unified
+by a shared eval data format.
+
+### Model Results Dashboard (`/dashboard`) — user-facing
+- Reads a `models.json` manifest listing all models with their eval stats.
+- Each model entry has: name, type (heuristic / n-tuple / etc), description,
+  and eval results (avg score, max score, tile-reach percentages).
+- Heuristic agents (e.g. the dummy agent) appear as models with type
+  "heuristic" and a single eval data point — no training curve, just
+  performance. No special casing needed.
+- Users can select models via dropdown or multi-select to compare side by side.
+- Trained models include their full training curve (array of eval checkpoints)
+  so the learning progression is visible.
+- Static data — the server serves `models.json` and the page renders it.
+
+### Live Training Dashboard (`/dashboard/training`) — internal or user-facing
+- Reads the JSONL log from an active training run.
+- Shows: model name, training config (total games, learning rate, patterns),
+  progress (% complete based on games_trained / total_games).
+- Auto-refreshes (tuneable interval, default 1s) until training is complete,
+  then stops automatically.
+- Training is considered complete when games_trained in the last log entry
+  equals the configured total.
+
+### Data format
+- Both dashboards consume the same `EvalResult` JSON structure.
+- For the model results dashboard, `models.json` wraps eval results with model
+  metadata.
+- For the live training dashboard, the JSONL file is the raw eval stream. A
+  companion `training_config.json` provides the metadata (model name, total
+  games, learning rate, etc.).
+
+---
+
+## 12. Performance Optimization
+
+**Status:** Deferred — to be tackled immediately after dashboard work is complete.
+
+**Approach:** Profile first, then fix. No guessing.
+- Build a benchmarking/evaluation framework to measure games/sec and
+  moves/sec.
+- Aim to surpass existing tooling (moporgic/TDL2048 reports 102M moves/sec on
+  Ryzen 9). We are building a best-in-class system.
+- **Known likely bottlenecks** (to be confirmed by profiling):
+  1. N-tuple index computation via repeated `get_tile` calls — should
+     precompute tuple indices directly from 16-bit rows.
+  2. Vec allocations in hot path (`empty_tiles` called every move).
+  3. Naive transpose (16 get/set calls) — should be bitwise.
+- Define a repeatable benchmark suite so we can measure before/after for every
+  optimization.
+
+---
 
 **Remaining phase 1 items (unblocked after deployment):**
 - Mobile support: touch/swipe input handling (touchstart/touchend → direction)

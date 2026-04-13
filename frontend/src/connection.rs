@@ -61,10 +61,12 @@ pub fn connect() {
     on_keydown.forget();
 
     // New game button (take over from agent)
+    let doc_for_play = document.clone();
     if let Some(button) = document.get_element_by_id("new-game-btn") {
         let on_click = Closure::wrap(Box::new(move |_: JsValue| {
             let message = ClientMessage::new_game();
             ws_for_new_game.send_with_str(&message).unwrap();
+            render::render_play_hint(&doc_for_play, true);
         }) as Box<dyn FnMut(JsValue)>);
         button
             .add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())
@@ -74,10 +76,12 @@ pub fn connect() {
 
     // Watch agent button
     let ws_for_watch = websocket.clone();
+    let doc_for_watch = document.clone();
     if let Some(button) = document.get_element_by_id("watch-agent-btn") {
         let on_click = Closure::wrap(Box::new(move |_: JsValue| {
             let message = ClientMessage::watch_agent();
             ws_for_watch.send_with_str(&message).unwrap();
+            render::render_play_hint(&doc_for_watch, false);
         }) as Box<dyn FnMut(JsValue)>);
         button
             .add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())

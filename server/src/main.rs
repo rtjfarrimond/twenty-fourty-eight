@@ -41,6 +41,7 @@ async fn main() {
     let app = Router::new()
         .route("/ws", get(websocket_handler))
         .route("/training_log.jsonl", get(serve_training_log))
+        .route("/training_config.json", get(serve_training_config))
         .fallback_service(ServeDir::new("../frontend/dist"))
         .with_state(state);
 
@@ -50,13 +51,24 @@ async fn main() {
 }
 
 async fn serve_training_log() -> impl IntoResponse {
-    let path = "../training/training_log.jsonl";
+    serve_file("../training/training_log.jsonl", "application/jsonl").await
+}
+
+async fn serve_training_config() -> impl IntoResponse {
+    serve_file("../training/training_config.json", "application/json").await
+}
+
+async fn serve_file(path: &str, content_type: &str) -> axum::response::Response {
     match tokio::fs::read_to_string(path).await {
         Ok(contents) => (
-            [(axum::http::header::CONTENT_TYPE, "application/jsonl")],
+            [(axum::http::header::CONTENT_TYPE, content_type.to_string())],
             contents,
         )
             .into_response(),
-        Err(_) => (axum::http::StatusCode::NOT_FOUND, "No training log found").into_response(),
+        Err(_) => (
+            axum::http::StatusCode::NOT_FOUND,
+            format!("File not found: {path}"),
+        )
+            .into_response(),
     }
 }

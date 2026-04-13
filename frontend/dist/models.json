@@ -1,0 +1,20 @@
+{
+  "models": [
+    {
+      "model_name": "heuristic-down-right",
+      "model_type": "heuristic",
+      "description": "Baseline heuristic: prefers Down, Right, Left, Up in that order.",
+      "training_curve": null,
+      "final_eval": {
+        "games_trained": 0,
+        "avg_score": 2527.66,
+        "max_score": 7688,
+        "tile_2048_pct": 0.0,
+        "tile_4096_pct": 0.0,
+        "tile_8192_pct": 0.0,
+        "tile_16384_pct": 0.0,
+        "tile_32768_pct": 0.0
+      }
+    }
+  ]
+}

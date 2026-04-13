@@ -2,7 +2,7 @@ use game_engine::{
     Board, Direction, MoveTables, apply_move, empty_tiles, is_game_over, spawn_tile,
 };
 use rand::Rng;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::ntuple::NTupleNetwork;
 
@@ -14,7 +14,7 @@ const ALL_DIRECTIONS: [Direction; 4] = [
 ];
 
 /// A single evaluation log entry, written as one JSON line.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvalResult {
     pub games_trained: u32,
     pub avg_score: f64,

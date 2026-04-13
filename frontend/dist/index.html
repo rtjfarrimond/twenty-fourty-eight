@@ -145,6 +145,7 @@
             margin-top: 15px;
             color: #776e65;
             font-size: 14px;
+            text-align: left;
         }
     </style>
 </head>
@@ -169,7 +170,12 @@
                 <div id="last-move"></div>
             </div>
         </div>
-        <p class="instructions">Use arrow keys to play</p>
+        <p id="play-hint" class="instructions" style="display:none">Use arrow keys to play</p>
+        <p class="instructions links">
+            <a href="/dashboard.html" style="color:#8f7a66;">Model results</a>
+            &middot;
+            <a href="/dashboard/training.html" style="color:#8f7a66;">Live training</a>
+        </p>
     </div>
 
     <script type="module">

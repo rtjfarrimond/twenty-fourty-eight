@@ -85,6 +85,16 @@ pub fn render_game_over(document: &Document, game_over: bool) {
     }
 }
 
+/// Shows or hides the "Use arrow keys to play" hint.
+pub fn render_play_hint(document: &Document, playing: bool) {
+    if let Some(element) = document.get_element_by_id("play-hint") {
+        let display = if playing { "block" } else { "none" };
+        element
+            .set_attribute("style", &format!("display:{display}"))
+            .unwrap();
+    }
+}
+
 /// Displays the last move as an arrow symbol.
 pub fn render_last_move(document: &Document, last_move: &Option<String>) {
     if let Some(element) = document.get_element_by_id("last-move") {
