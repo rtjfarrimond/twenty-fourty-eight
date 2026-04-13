@@ -7,9 +7,126 @@
       "training_curve": null,
       "final_eval": {
         "games_trained": 0,
-        "avg_score": 2527.66,
-        "max_score": 7688,
+        "avg_score": 2547.52,
+        "max_score": 6832,
         "tile_2048_pct": 0.0,
+        "tile_4096_pct": 0.0,
+        "tile_8192_pct": 0.0,
+        "tile_16384_pct": 0.0,
+        "tile_32768_pct": 0.0
+      }
+    },
+    {
+      "model_name": "ntuple-4x6-td0-v1",
+      "model_type": "n-tuple",
+      "description": "N-tuple TD(0), 32 patterns, lr=0.0025",
+      "training_curve": [
+        {
+          "games_trained": 10000,
+          "avg_score": 6482.56,
+          "max_score": 21012,
+          "tile_2048_pct": 0.1,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 20000,
+          "avg_score": 8583.704,
+          "max_score": 28252,
+          "tile_2048_pct": 0.5,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 30000,
+          "avg_score": 9371.3,
+          "max_score": 26876,
+          "tile_2048_pct": 0.8,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 40000,
+          "avg_score": 10000.708,
+          "max_score": 27584,
+          "tile_2048_pct": 0.8,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 50000,
+          "avg_score": 10646.62,
+          "max_score": 31396,
+          "tile_2048_pct": 1.7000000000000002,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 60000,
+          "avg_score": 11286.688,
+          "max_score": 29708,
+          "tile_2048_pct": 2.4,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 70000,
+          "avg_score": 11654.032,
+          "max_score": 32076,
+          "tile_2048_pct": 3.5000000000000004,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 80000,
+          "avg_score": 12379.384,
+          "max_score": 32156,
+          "tile_2048_pct": 3.5999999999999996,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 90000,
+          "avg_score": 12554.724,
+          "max_score": 31248,
+          "tile_2048_pct": 4.6,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 100000,
+          "avg_score": 13009.708,
+          "max_score": 35116,
+          "tile_2048_pct": 5.8999999999999995,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        }
+      ],
+      "final_eval": {
+        "games_trained": 100000,
+        "avg_score": 13009.708,
+        "max_score": 35116,
+        "tile_2048_pct": 5.8999999999999995,
         "tile_4096_pct": 0.0,
         "tile_8192_pct": 0.0,
         "tile_16384_pct": 0.0,

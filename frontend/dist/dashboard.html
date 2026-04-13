@@ -26,31 +26,6 @@
 
         .subtitle a { color: #8f7a66; }
 
-        .controls {
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .controls label {
-            font-weight: bold;
-            font-size: 14px;
-        }
-
-        .controls select {
-            padding: 8px 12px;
-            border-radius: 6px;
-            border: 2px solid #bbada0;
-            font-size: 14px;
-            font-family: inherit;
-            background: #fff;
-            min-width: 200px;
-        }
-
-        .controls select[multiple] {
-            height: 80px;
-        }
 
         .stats {
             display: flex;
@@ -78,33 +53,6 @@
             font-weight: bold;
         }
 
-        .model-header {
-            background: #bbada0;
-            color: #f9f6f2;
-            padding: 12px 20px;
-            border-radius: 6px;
-            margin-bottom: 15px;
-        }
-
-        .model-header h2 {
-            font-size: 20px;
-            margin-bottom: 4px;
-        }
-
-        .model-header .description {
-            font-size: 13px;
-            opacity: 0.9;
-        }
-
-        .model-header .type-badge {
-            display: inline-block;
-            background: rgba(255,255,255,0.2);
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            text-transform: uppercase;
-            margin-left: 10px;
-        }
 
         .charts {
             display: grid;
@@ -161,6 +109,23 @@
         .comparison-table tr:nth-child(even) {
             background: #f5f0eb;
         }
+
+        .comparison-table th.sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .comparison-table th.sortable:hover {
+            background: #a89888;
+        }
+
+        .cell-description {
+            font-size: 12px;
+            font-weight: normal;
+            color: #9f8b77;
+            margin-top: 4px;
+            line-height: 1.4;
+        }
     </style>
 </head>
 <body>
@@ -173,75 +138,96 @@
 
     <h1>Model Results</h1>
 
-    <div class="controls">
-        <label>Compare models:</label>
-        <select id="model-select" multiple></select>
-    </div>
-
-    <div id="comparison"></div>
-    <div id="model-details"></div>
+    <div id="results-table"></div>
+    <div id="charts-section"></div>
 
     <script>
         let allModels = [];
+        let sortColumn = 'max_score';
+        let sortAsc = false;
 
         async function load() {
             try {
                 const response = await fetch('/models.json');
                 if (!response.ok) {
-                    document.getElementById('comparison').innerHTML =
+                    document.getElementById('results-table').innerHTML =
                         '<p>No models.json found. Run generate_models first.</p>';
                     return;
                 }
                 const data = await response.json();
                 allModels = data.models;
-                populateSelect();
-                renderAll();
+                renderTable();
+                renderCharts(allModels);
             } catch (err) {
                 console.error('Failed to load models:', err);
             }
         }
 
-        function populateSelect() {
-            const select = document.getElementById('model-select');
-            select.innerHTML = '';
-            allModels.forEach((model, index) => {
-                const option = document.createElement('option');
-                option.value = index;
-                option.textContent = model.model_name;
-                option.selected = true;
-                select.appendChild(option);
-            });
-            select.addEventListener('change', renderAll);
-        }
-
-        function selectedModels() {
-            const select = document.getElementById('model-select');
-            return Array.from(select.selectedOptions).map(opt => allModels[parseInt(opt.value)]);
-        }
-
-        function renderAll() {
-            const models = selectedModels();
-            renderComparisonTable(models);
-            renderModelDetails(models);
-        }
-
-        function renderComparisonTable(models) {
-            const container = document.getElementById('comparison');
-            if (models.length === 0) {
-                container.innerHTML = '<p>Select at least one model.</p>';
-                return;
+        function sortValue(model, column) {
+            const ev = model.final_eval;
+            switch (column) {
+                case 'model_name': return model.model_name.toLowerCase();
+                case 'model_type': return model.model_type.toLowerCase();
+                case 'avg_score': return ev.avg_score;
+                case 'max_score': return ev.max_score;
+                case 'tile_2048_pct': return ev.tile_2048_pct;
+                case 'tile_4096_pct': return ev.tile_4096_pct;
+                case 'tile_8192_pct': return ev.tile_8192_pct;
+                case 'tile_16384_pct': return ev.tile_16384_pct;
+                case 'tile_32768_pct': return ev.tile_32768_pct;
+                default: return 0;
             }
+        }
 
-            let html = `<table class="comparison-table">
-                <tr>
-                    <th>Model</th><th>Type</th><th>Avg Score</th><th>Max Score</th>
-                    <th>2048%</th><th>4096%</th><th>8192%</th><th>16384%</th><th>32768%</th>
-                </tr>`;
+        function handleSort(column) {
+            if (sortColumn === column) {
+                sortAsc = !sortAsc;
+            } else {
+                sortColumn = column;
+                sortAsc = false;
+            }
+            renderTable();
+        }
 
-            for (const model of models) {
+        function sortIndicator(column) {
+            if (sortColumn !== column) return '';
+            return sortAsc ? ' \u25B2' : ' \u25BC';
+        }
+
+        function renderTable() {
+            const sorted = [...allModels].sort((a, b) => {
+                const va = sortValue(a, sortColumn);
+                const vb = sortValue(b, sortColumn);
+                const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+                return sortAsc ? cmp : -cmp;
+            });
+
+            const container = document.getElementById('results-table');
+            const columns = [
+                ['model_name', 'Model'],
+                ['model_type', 'Type'],
+                ['avg_score', 'Avg Score'],
+                ['max_score', 'Max Score'],
+                ['tile_2048_pct', '2048%'],
+                ['tile_4096_pct', '4096%'],
+                ['tile_8192_pct', '8192%'],
+                ['tile_16384_pct', '16384%'],
+                ['tile_32768_pct', '32768%'],
+            ];
+
+            let html = '<table class="comparison-table"><tr>';
+            for (const [key, label] of columns) {
+                html += `<th class="sortable" onclick="handleSort('${key}')">${label}${sortIndicator(key)}</th>`;
+            }
+            html += '</tr>';
+
+            for (const model of sorted) {
                 const ev = model.final_eval;
                 html += `<tr>
-                    <td><strong>${model.model_name}</strong></td>
+                    <td>
+                        <strong>${model.model_name}</strong>
+                        <div class="cell-description">${model.description}</div>
+                    </td>
                     <td>${model.model_type}</td>
                     <td>${Math.round(ev.avg_score).toLocaleString()}</td>
                     <td>${ev.max_score.toLocaleString()}</td>
@@ -259,94 +245,70 @@
 
         const CHART_COLORS = ['#8f7a66', '#edc22e', '#f67c5f', '#f65e3b', '#edcf72'];
 
-        function renderModelDetails(models) {
-            const container = document.getElementById('model-details');
+        function renderCharts(models) {
+            const container = document.getElementById('charts-section');
             container.innerHTML = '';
 
-            // If any model has a training curve, show the combined chart
             const trainedModels = models.filter(m => m.training_curve && m.training_curve.length > 0);
+            if (trainedModels.length === 0) return;
 
-            if (trainedModels.length > 0) {
-                const section = document.createElement('div');
-                section.innerHTML = `
-                    <div class="charts">
-                        <div class="chart-container">
-                            <h3>Training Progress — Average Score</h3>
-                            <canvas id="combined-score-chart"></canvas>
-                        </div>
-                        <div class="chart-container">
-                            <h3>Training Progress — 2048 Tile Rate</h3>
-                            <canvas id="combined-tile-chart"></canvas>
-                        </div>
-                    </div>`;
-                container.appendChild(section);
-
-                // Score chart
-                const maxLen = Math.max(...trainedModels.map(m => m.training_curve.length));
-                const longestModel = trainedModels.find(m => m.training_curve.length === maxLen);
-                const labels = longestModel.training_curve.map(e => e.games_trained.toLocaleString());
-
-                new Chart(document.getElementById('combined-score-chart'), {
-                    type: 'line',
-                    data: {
-                        labels,
-                        datasets: trainedModels.map((model, i) => ({
-                            label: model.model_name,
-                            data: model.training_curve.map(e => e.avg_score),
-                            borderColor: CHART_COLORS[i % CHART_COLORS.length],
-                            fill: false,
-                            tension: 0.3,
-                        }))
-                    },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            x: { title: { display: true, text: 'Games Trained' } },
-                            y: { title: { display: true, text: 'Avg Score' }, beginAtZero: true }
-                        }
-                    }
-                });
-
-                new Chart(document.getElementById('combined-tile-chart'), {
-                    type: 'line',
-                    data: {
-                        labels,
-                        datasets: trainedModels.map((model, i) => ({
-                            label: model.model_name,
-                            data: model.training_curve.map(e => e.tile_2048_pct),
-                            borderColor: CHART_COLORS[i % CHART_COLORS.length],
-                            fill: false,
-                            tension: 0.3,
-                        }))
-                    },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            x: { title: { display: true, text: 'Games Trained' } },
-                            y: { title: { display: true, text: '2048 Reach %' }, beginAtZero: true, max: 100 }
-                        }
-                    }
-                });
-            }
-
-            // Individual model cards
-            for (const model of models) {
-                const card = document.createElement('div');
-                const ev = model.final_eval;
-                card.innerHTML = `
-                    <div class="model-header">
-                        <h2>${model.model_name}<span class="type-badge">${model.model_type}</span></h2>
-                        <div class="description">${model.description}</div>
+            container.innerHTML = `
+                <div class="charts">
+                    <div class="chart-container">
+                        <h3>Training Progress — Average Score</h3>
+                        <canvas id="combined-score-chart"></canvas>
                     </div>
-                    <div class="stats">
-                        <div class="stat"><div class="label">Avg Score</div><div class="value">${Math.round(ev.avg_score).toLocaleString()}</div></div>
-                        <div class="stat"><div class="label">Max Score</div><div class="value">${ev.max_score.toLocaleString()}</div></div>
-                        <div class="stat"><div class="label">2048 Rate</div><div class="value">${ev.tile_2048_pct.toFixed(1)}%</div></div>
-                        <div class="stat"><div class="label">4096 Rate</div><div class="value">${ev.tile_4096_pct.toFixed(1)}%</div></div>
-                        <div class="stat"><div class="label">8192 Rate</div><div class="value">${ev.tile_8192_pct.toFixed(1)}%</div></div>
-                    </div>`;
-                container.appendChild(card);
-            }
+                    <div class="chart-container">
+                        <h3>Training Progress — 2048 Tile Rate</h3>
+                        <canvas id="combined-tile-chart"></canvas>
+                    </div>
+                </div>`;
+
+            const maxLen = Math.max(...trainedModels.map(m => m.training_curve.length));
+            const longestModel = trainedModels.find(m => m.training_curve.length === maxLen);
+            const labels = longestModel.training_curve.map(e => e.games_trained.toLocaleString());
+
+            new Chart(document.getElementById('combined-score-chart'), {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: trainedModels.map((model, i) => ({
+                        label: model.model_name,
+                        data: model.training_curve.map(e => e.avg_score),
+                        borderColor: CHART_COLORS[i % CHART_COLORS.length],
+                        fill: false,
+                        tension: 0.3,
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: 'Games Trained' } },
+                        y: { title: { display: true, text: 'Avg Score' }, beginAtZero: true }
+                    }
+                }
+            });
+
+            new Chart(document.getElementById('combined-tile-chart'), {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: trainedModels.map((model, i) => ({
+                        label: model.model_name,
+                        data: model.training_curve.map(e => e.tile_2048_pct),
+                        borderColor: CHART_COLORS[i % CHART_COLORS.length],
+                        fill: false,
+                        tension: 0.3,
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: 'Games Trained' } },
+                        y: { title: { display: true, text: '2048 Reach %' }, beginAtZero: true, max: 100 }
+                    }
+                }
+            });
         }
 
         load();
