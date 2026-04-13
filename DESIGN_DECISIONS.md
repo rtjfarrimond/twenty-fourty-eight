@@ -206,5 +206,9 @@ parallel.
 **Rationale:** End-to-end vertical slices over layer-by-layer. Catches
 integration issues early and produces something tangible at each milestone.
 
+**Remaining phase 1 items (unblocked after deployment):**
+- Mobile support: touch/swipe input handling (touchstart/touchend → direction)
+- Tile sliding animations (requires client-side state diffing)
+
 ---
 

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2048</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Clear Sans', 'Helvetica Neue', Arial, sans-serif;
+            background: #faf8ef;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 80px;
+            color: #776e65;
+            margin-bottom: 10px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 20px;
+        }
+
+        .score-container {
+            background: #bbada0;
+            color: #fff;
+            padding: 10px 25px;
+            border-radius: 6px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .score-container .label {
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+
+        #score {
+            font-size: 25px;
+        }
+
+        button {
+            background: #8f7a66;
+            color: #f9f6f2;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 20px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #9f8b77;
+        }
+
+        .board {
+            position: relative;
+            background: #bbada0;
+            border-radius: 6px;
+            padding: 12px;
+            display: inline-block;
+        }
+
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(4, 100px);
+            grid-template-rows: repeat(4, 100px);
+            gap: 12px;
+        }
+
+        .tile {
+            width: 100px;
+            height: 100px;
+        }
+
+
+        #game-over {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(238, 228, 218, 0.73);
+            border-radius: 6px;
+            justify-content: center;
+            align-items: center;
+            font-size: 60px;
+            font-weight: bold;
+            color: #776e65;
+        }
+
+        .instructions {
+            margin-top: 15px;
+            color: #776e65;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>2048</h1>
+            <div class="score-container">
+                <div class="label">Score</div>
+                <div id="score">0</div>
+            </div>
+            <button id="new-game-btn">New Game</button>
+        </div>
+        <div class="board">
+            <div id="grid"></div>
+            <div id="game-over">Game Over</div>
+        </div>
+        <p class="instructions">Use arrow keys to play</p>
+    </div>
+
+    <script type="module">
+        import init from './pkg/frontend.js';
+        init();
+    </script>
+</body>
+</html>
