@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
-use web_sys::{Event, KeyboardEvent, MessageEvent, WebSocket};
+use web_sys::{Event, KeyboardEvent, MessageEvent, TouchEvent, WebSocket};
 
 use crate::protocol::{ClientMessage, ModelInfo, ServerMessage};
 use crate::render;
@@ -59,6 +59,64 @@ pub fn connect() {
         .add_event_listener_with_callback("keydown", on_keydown.as_ref().unchecked_ref())
         .unwrap();
     on_keydown.forget();
+
+    // Touch swipe input (mobile) — scoped to the board element
+    let ws_for_touch = websocket.clone();
+    if let Some(board) = document.get_element_by_id("grid") {
+        let touch_start: Rc<RefCell<Option<(f64, f64)>>> = Rc::new(RefCell::new(None));
+
+        let touch_start_ref = touch_start.clone();
+        let on_touchstart = Closure::wrap(Box::new(move |event: TouchEvent| {
+            if let Some(touch) = event.touches().get(0) {
+                *touch_start_ref.borrow_mut() = Some((touch.client_x() as f64, touch.client_y() as f64));
+            }
+        }) as Box<dyn FnMut(TouchEvent)>);
+        board
+            .add_event_listener_with_callback("touchstart", on_touchstart.as_ref().unchecked_ref())
+            .unwrap();
+        on_touchstart.forget();
+
+        let touch_start_move = touch_start.clone();
+        let on_touchmove = Closure::wrap(Box::new(move |event: TouchEvent| {
+            // If a swipe started on the grid, prevent scroll/pull-to-refresh
+            if touch_start_move.borrow().is_some() {
+                event.prevent_default();
+            }
+        }) as Box<dyn FnMut(TouchEvent)>);
+        board
+            .add_event_listener_with_callback_and_add_event_listener_options(
+                "touchmove",
+                on_touchmove.as_ref().unchecked_ref(),
+                web_sys::AddEventListenerOptions::new().passive(false),
+            )
+            .unwrap();
+        on_touchmove.forget();
+
+        let on_touchend = Closure::wrap(Box::new(move |event: TouchEvent| {
+            let start = touch_start.borrow_mut().take();
+            let Some((start_x, start_y)) = start else { return };
+            let Some(touch) = event.changed_touches().get(0) else { return };
+
+            let delta_x = touch.client_x() as f64 - start_x;
+            let delta_y = touch.client_y() as f64 - start_y;
+            let min_distance = 30.0;
+
+            let direction = if delta_x.abs() > delta_y.abs() {
+                if delta_x.abs() < min_distance { return; }
+                if delta_x > 0.0 { "right" } else { "left" }
+            } else {
+                if delta_y.abs() < min_distance { return; }
+                if delta_y > 0.0 { "down" } else { "up" }
+            };
+
+            event.prevent_default();
+            ws_for_touch.send_with_str(&ClientMessage::make_move(direction)).unwrap();
+        }) as Box<dyn FnMut(TouchEvent)>);
+        board
+            .add_event_listener_with_callback("touchend", on_touchend.as_ref().unchecked_ref())
+            .unwrap();
+        on_touchend.forget();
+    }
 
     // Play button → switch to playing mode, resuming existing game if any
     let ws_for_play = websocket.clone();
