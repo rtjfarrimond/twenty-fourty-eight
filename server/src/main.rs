@@ -4,6 +4,7 @@ mod session;
 mod websocket;
 
 use axum::Router;
+use axum::response::IntoResponse;
 use axum::routing::get;
 use game_engine::MoveTables;
 use model::dummy::DummyAgent;
@@ -39,10 +40,23 @@ async fn main() {
 
     let app = Router::new()
         .route("/ws", get(websocket_handler))
+        .route("/training_log.jsonl", get(serve_training_log))
         .fallback_service(ServeDir::new("../frontend/dist"))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("[::]:3000").await.unwrap();
     println!("Server running on http://localhost:3000");
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn serve_training_log() -> impl IntoResponse {
+    let path = "../training/training_log.jsonl";
+    match tokio::fs::read_to_string(path).await {
+        Ok(contents) => (
+            [(axum::http::header::CONTENT_TYPE, "application/jsonl")],
+            contents,
+        )
+            .into_response(),
+        Err(_) => (axum::http::StatusCode::NOT_FOUND, "No training log found").into_response(),
+    }
 }

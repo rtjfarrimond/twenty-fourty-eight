@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2048 — Training Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Clear Sans', 'Helvetica Neue', Arial, sans-serif;
+            background: #faf8ef;
+            padding: 30px;
+            color: #776e65;
+        }
+
+        h1 {
+            font-size: 36px;
+            margin-bottom: 20px;
+        }
+
+        .charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            max-width: 1200px;
+        }
+
+        .chart-container {
+            background: #fff;
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .chart-container h2 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .status {
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .status .value {
+            font-weight: bold;
+            color: #8f7a66;
+        }
+
+        .stats {
+            display: flex;
+            gap: 30px;
+            margin-bottom: 20px;
+        }
+
+        .stat {
+            background: #8f7a66;
+            color: #f9f6f2;
+            border-radius: 6px;
+            padding: 15px 25px;
+            text-align: center;
+        }
+
+        .stat .label {
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .stat .value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Training Dashboard</h1>
+
+    <div class="status">
+        Refresh interval:
+        <select id="refresh-interval">
+            <option value="1000" selected>1s</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+            <option value="30000">30s</option>
+            <option value="60000">60s</option>
+        </select>
+        Last update: <span id="last-update" class="value">—</span>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="charts">
+        <div class="chart-container">
+            <h2>Average Score</h2>
+            <canvas id="score-chart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h2>Tile Reach Rate (%)</h2>
+            <canvas id="tile-chart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const LOG_URL = '/training_log.jsonl';
+        let refreshTimer = null;
+
+        let scoreChart = null;
+        let tileChart = null;
+
+        function createScoreChart(data) {
+            const ctx = document.getElementById('score-chart').getContext('2d');
+            const config = {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.games_trained.toLocaleString()),
+                    datasets: [{
+                        label: 'Avg Score',
+                        data: data.map(d => d.avg_score),
+                        borderColor: '#8f7a66',
+                        backgroundColor: 'rgba(143,122,102,0.1)',
+                        fill: true,
+                        tension: 0.3,
+                    }, {
+                        label: 'Max Score',
+                        data: data.map(d => d.max_score),
+                        borderColor: '#edc22e',
+                        borderDash: [5, 5],
+                        fill: false,
+                        tension: 0.3,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: 'Games Trained' } },
+                        y: { title: { display: true, text: 'Score' }, beginAtZero: true }
+                    }
+                }
+            };
+
+            if (scoreChart) {
+                scoreChart.data = config.data;
+                scoreChart.update();
+            } else {
+                scoreChart = new Chart(ctx, config);
+            }
+        }
+
+        function createTileChart(data) {
+            const ctx = document.getElementById('tile-chart').getContext('2d');
+            const config = {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.games_trained.toLocaleString()),
+                    datasets: [
+                        { label: '2048', data: data.map(d => d.tile_2048_pct), borderColor: '#edc22e', tension: 0.3 },
+                        { label: '4096', data: data.map(d => d.tile_4096_pct), borderColor: '#f67c5f', tension: 0.3 },
+                        { label: '8192', data: data.map(d => d.tile_8192_pct), borderColor: '#f65e3b', tension: 0.3 },
+                        { label: '16384', data: data.map(d => d.tile_16384_pct), borderColor: '#edcf72', tension: 0.3 },
+                        { label: '32768', data: data.map(d => d.tile_32768_pct), borderColor: '#bbada0', tension: 0.3 },
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: 'Games Trained' } },
+                        y: { title: { display: true, text: '%' }, beginAtZero: true, max: 100 }
+                    }
+                }
+            };
+
+            if (tileChart) {
+                tileChart.data = config.data;
+                tileChart.update();
+            } else {
+                tileChart = new Chart(ctx, config);
+            }
+        }
+
+        function updateStats(data) {
+            const container = document.getElementById('stats');
+            if (data.length === 0) {
+                container.innerHTML = '<p>No training data yet.</p>';
+                return;
+            }
+            const latest = data[data.length - 1];
+            container.innerHTML = `
+                <div class="stat">
+                    <div class="label">Games Trained</div>
+                    <div class="value">${latest.games_trained.toLocaleString()}</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Avg Score</div>
+                    <div class="value">${Math.round(latest.avg_score).toLocaleString()}</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Max Score</div>
+                    <div class="value">${latest.max_score.toLocaleString()}</div>
+                </div>
+                <div class="stat">
+                    <div class="label">2048 Rate</div>
+                    <div class="value">${latest.tile_2048_pct.toFixed(1)}%</div>
+                </div>
+                <div class="stat">
+                    <div class="label">4096 Rate</div>
+                    <div class="value">${latest.tile_4096_pct.toFixed(1)}%</div>
+                </div>
+            `;
+        }
+
+        async function refresh() {
+            try {
+                const response = await fetch(LOG_URL);
+                if (!response.ok) return;
+                const text = await response.text();
+                const data = text.trim().split('\n')
+                    .filter(line => line.length > 0)
+                    .map(line => JSON.parse(line));
+
+                if (data.length === 0) return;
+
+                createScoreChart(data);
+                createTileChart(data);
+                updateStats(data);
+                document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+            } catch (err) {
+                console.error('Failed to fetch training log:', err);
+            }
+        }
+
+        function startRefreshLoop() {
+            if (refreshTimer) clearInterval(refreshTimer);
+            const interval = parseInt(document.getElementById('refresh-interval').value);
+            refreshTimer = setInterval(refresh, interval);
+        }
+
+        document.getElementById('refresh-interval').addEventListener('change', startRefreshLoop);
+
+        refresh();
+        startRefreshLoop();
+    </script>
+</body>
+</html>

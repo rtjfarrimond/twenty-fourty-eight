@@ -1,0 +1,10 @@
+{"games_trained":10000,"avg_score":4272.856,"max_score":13532,"tile_2048_pct":0.0,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":20000,"avg_score":6015.068,"max_score":18268,"tile_2048_pct":0.0,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":30000,"avg_score":7015.428,"max_score":18140,"tile_2048_pct":0.0,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":40000,"avg_score":7919.244,"max_score":16340,"tile_2048_pct":0.0,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":50000,"avg_score":8296.384,"max_score":17692,"tile_2048_pct":0.0,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":60000,"avg_score":8745.072,"max_score":21360,"tile_2048_pct":0.1,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":70000,"avg_score":9006.956,"max_score":27968,"tile_2048_pct":0.3,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":80000,"avg_score":9289.968,"max_score":25056,"tile_2048_pct":0.4,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":90000,"avg_score":9576.676,"max_score":30528,"tile_2048_pct":0.3,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}
+{"games_trained":100000,"avg_score":9713.288,"max_score":24332,"tile_2048_pct":0.3,"tile_4096_pct":0.0,"tile_8192_pct":0.0,"tile_16384_pct":0.0,"tile_32768_pct":0.0}

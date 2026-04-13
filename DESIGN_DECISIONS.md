@@ -209,6 +209,8 @@ integration issues early and produces something tangible at each milestone.
 **Remaining phase 1 items (unblocked after deployment):**
 - Mobile support: touch/swipe input handling (touchstart/touchend → direction)
 - Tile sliding animations (requires client-side state diffing)
+- Replace unicode arrow characters with SVG/icon font for consistent
+  cross-device rendering (current padding hack is browser-specific)
 
 ---
 
