@@ -1,6 +1,7 @@
 mod agent_loop;
 mod config;
 mod model_registry;
+mod model_watcher;
 mod protocol;
 mod session;
 mod websocket;
@@ -37,11 +38,11 @@ async fn main() {
     let tables = Arc::new(MoveTables::new());
     let session_manager = Arc::new(Mutex::new(SessionManager::new(tables.clone())));
 
-    let mut registry = ModelRegistry::new();
+    let registry = Arc::new(ModelRegistry::new());
 
     // Scan models directory for .bin files and load each with its .meta.toml
     if config.models_dir.exists() {
-        load_models_from_directory(&config.models_dir, &tables, &mut registry);
+        load_models_from_directory(&config.models_dir, &tables, &registry).await;
     } else {
         println!(
             "Models directory not found: {}",
@@ -52,20 +53,26 @@ async fn main() {
     // Always register the dummy heuristic as a baseline
     let dummy = DummyAgent::new(tables.clone());
     println!("Registered model: {}", dummy.name());
-    registry.register(Arc::new(dummy));
-
-    let registry = Arc::new(registry);
+    registry.register(Arc::new(dummy)).await;
 
     let move_interval = Duration::from_millis(config.move_interval_ms);
-    for (name, model) in registry.iter() {
+    for (name, agent, sender) in registry.snapshot().await {
         println!("Starting game loop for: {name}");
-        let agent = model.agent.clone();
-        let sender = model.sender.clone();
         let tables = tables.clone();
         tokio::spawn(agent_loop::run_agent_loop(
             agent,
             tables,
             sender,
+            move_interval,
+        ));
+    }
+
+    // Watch for new models dropped into the models directory
+    if config.models_dir.exists() {
+        tokio::spawn(model_watcher::watch_models_directory(
+            config.models_dir.clone(),
+            registry.clone(),
+            tables.clone(),
             move_interval,
         ));
     }
@@ -105,10 +112,10 @@ async fn main() {
 
 /// Scans a directory for .bin model files and loads each one.
 /// Looks for a matching .meta.toml sidecar for name/description.
-fn load_models_from_directory(
+async fn load_models_from_directory(
     directory: &Path,
     tables: &Arc<MoveTables>,
-    registry: &mut ModelRegistry,
+    registry: &Arc<ModelRegistry>,
 ) {
     let mut entries: Vec<_> = std::fs::read_dir(directory)
         .unwrap()
@@ -153,7 +160,7 @@ fn load_models_from_directory(
         ) {
             Ok(agent) => {
                 println!("Loaded model: {}", agent.name());
-                registry.register(Arc::new(agent));
+                registry.register(Arc::new(agent)).await;
             }
             Err(err) => {
                 println!("Failed to load {}: {err}", bin_path.display());

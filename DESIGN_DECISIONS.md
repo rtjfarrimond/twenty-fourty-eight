@@ -261,37 +261,41 @@ by a shared eval data format.
 
 ## 13. Hot Model Loading
 
-**Status:** Planned — next session.
+**Status:** Implemented.
 
-**Decision:** The server should watch the models directory for new `.bin` files
-using inotify (Linux file change notifications) and load them automatically
+**Decision:** The server watches the models directory for new `.bin` files
+using inotify (Linux file change notifications) and loads them automatically
 without requiring a restart.
 
 **Details:**
-- Event-driven, not periodic scanning. Uses inotify to watch
-  `/var/lib/2048-solver/models/` for new files.
-- When a new `.bin` appears: load it, register it in the model registry, spin
-  up a new agent game loop, and make it available in the frontend dropdown.
-- The training binary should handle the full artefact lifecycle: train → save
-  `.bin` directly to the models directory → write `.meta.toml` → regenerate
-  `models.json`. No manual file moves or restarts required.
+- Event-driven, not periodic scanning. Uses the `notify` crate (inotify on
+  Linux) to watch the models directory for new files.
+- When a new `.bin` appears: waits 1s for the `.meta.toml` sidecar to arrive,
+  loads the model, registers it in the `ModelRegistry`, spins up a new agent
+  game loop, and makes it available to connected clients on next `ListModels`.
+- `ModelRegistry` uses `RwLock` for interior mutability, supporting runtime
+  model additions without restarting the server.
+- The training binary handles the full artefact lifecycle via `--models-dir`:
+  train → save `.bin` to models directory → write `.meta.toml` → copy training
+  logs → regenerate `models.json`. No manual file moves or restarts required.
 
 ---
 
 ## 14. Reproducibility
 
-**Status:** Planned — next session.
+**Status:** In progress — CLI refactored, model retraining pending.
 
 **Decision:** All existing models will be deleted and retrained from scratch to
 ensure full reproducibility with the current codebase.
 
 **Details:**
 - Every trained model must be reproducible from a documented command.
-- The training CLI currently uses positional arguments which is fragile and
-  hard to self-document. Switch to named flags (e.g. clap) so training configs
-  are explicit and old experiments can be re-run exactly.
+- The training CLI now uses clap with named flags (`--games`, `--eval-interval`,
+  `--model-name`, `--optimistic-init`, `--learning-rate`, `--models-dir`,
+  `--description`). Commands are self-documenting and old experiments can be
+  re-run exactly.
 - Training parameters (learning rate, optimistic init value, pattern set,
-  number of games, eval interval) must all be captured in the output artefacts.
+  number of games, eval interval) are all captured in the output artefacts.
 
 ---
 

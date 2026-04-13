@@ -77,11 +77,11 @@ done
 # Copy training logs if they exist
 for log_file in "$PROJECT_ROOT"/training/*.log.jsonl; do
     [ -f "$log_file" ] || continue
-    sudo cp "$log_file" /var/lib/2048-solver/training/
+    sudo cp -p "$log_file" /var/lib/2048-solver/training/
 done
 for config_file in "$PROJECT_ROOT"/training/*.config.json; do
     [ -f "$config_file" ] || continue
-    sudo cp "$config_file" /var/lib/2048-solver/training/
+    sudo cp -p "$config_file" /var/lib/2048-solver/training/
 done
 
 # Generate models.json from installed models

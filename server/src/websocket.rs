@@ -26,7 +26,7 @@ async fn handle_connection(mut socket: WebSocket, state: Arc<AppState>) {
 
     // Send model list on connect
     let model_list = ServerMessage::ModelList {
-        models: state.model_registry.list(),
+        models: state.model_registry.list().await,
     };
     let json = serde_json::to_string(&model_list).unwrap();
     if socket.send(Message::Text(json.into())).await.is_err() {
@@ -34,10 +34,8 @@ async fn handle_connection(mut socket: WebSocket, state: Arc<AppState>) {
     }
 
     // Auto-watch the default model
-    if let Some(default_name) = state.model_registry.default_model() {
-        if let Some(model) = state.model_registry.get(default_name) {
-            agent_receiver = Some(model.sender.subscribe());
-        }
+    if let Some(default_name) = state.model_registry.default_model().await {
+        agent_receiver = state.model_registry.subscribe(&default_name).await;
     }
 
     loop {
@@ -107,13 +105,13 @@ async fn handle_client_message(
 ) -> Option<ServerMessage> {
     match serde_json::from_str::<ClientMessage>(text) {
         Ok(ClientMessage::ListModels) => Some(ServerMessage::ModelList {
-            models: state.model_registry.list(),
+            models: state.model_registry.list().await,
         }),
         Ok(ClientMessage::WatchAgent { model }) => {
             // Keep the session alive — user can resume later
-            match state.model_registry.get(&model) {
-                Some(registered) => {
-                    *agent_receiver = Some(registered.sender.subscribe());
+            match state.model_registry.subscribe(&model).await {
+                Some(receiver) => {
+                    *agent_receiver = Some(receiver);
                     None
                 }
                 None => Some(ServerMessage::Error {
