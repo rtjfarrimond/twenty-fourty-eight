@@ -1,0 +1,6 @@
+# Development config — paths relative to running from server/ directory
+port = 3000
+move_interval_ms = 500
+frontend_dir = "../frontend/dist"
+models_dir = "../training"
+training_dir = "../training"

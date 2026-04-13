@@ -1,4 +1,5 @@
 mod agent_loop;
+mod config;
 mod model_registry;
 mod protocol;
 mod session;
@@ -7,12 +8,14 @@ mod websocket;
 use axum::Router;
 use axum::response::IntoResponse;
 use axum::routing::get;
+use config::ServerConfig;
 use game_engine::MoveTables;
 use model::Agent;
 use model::dummy::DummyAgent;
 use model::ntuple_agent::NTupleAgent;
 use model_registry::ModelRegistry;
 use session::SessionManager;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -21,50 +24,39 @@ use websocket::{AppState, websocket_handler};
 
 #[tokio::main]
 async fn main() {
+    let config = ServerConfig::load();
+
+    println!("Server config:");
+    println!("  Port: {}", config.port);
+    println!("  Frontend: {}", config.frontend_dir.display());
+    println!("  Models: {}", config.models_dir.display());
+    println!("  Training: {}", config.training_dir.display());
+    println!("  Move interval: {}ms", config.move_interval_ms);
+    println!();
+
     let tables = Arc::new(MoveTables::new());
     let session_manager = Arc::new(Mutex::new(SessionManager::new(tables.clone())));
 
     let mut registry = ModelRegistry::new();
 
-    // Register trained models (most trained first)
-    let models = [
-        (
-            "../training/ntuple-4x6-td0-1M.bin",
-            "ntuple-4x6-td0-1M",
-            "N-tuple network (4 base 6-tuple patterns) trained with TD(0) \
-             and afterstate value functions. 1M training games. \
-             Avg score ~35K, reaches 2048 in ~70% of games.",
-        ),
-        (
-            "../training/ntuple-4x6-td0-100K.bin",
-            "ntuple-4x6-td0-100K",
-            "N-tuple network (4 base 6-tuple patterns) trained with TD(0) \
-             and afterstate value functions. 100K training games. \
-             An early checkpoint showing the model learning.",
-        ),
-    ];
-
-    for (path, name, description) in models {
-        match NTupleAgent::load(path, name, description, tables.clone()) {
-            Ok(agent) => {
-                println!("Loaded trained model: {}", agent.name());
-                registry.register(Arc::new(agent));
-            }
-            Err(err) => {
-                println!("No trained model at {path}: {err}");
-            }
-        }
+    // Scan models directory for .bin files and load each with its .meta.toml
+    if config.models_dir.exists() {
+        load_models_from_directory(&config.models_dir, &tables, &mut registry);
+    } else {
+        println!(
+            "Models directory not found: {}",
+            config.models_dir.display()
+        );
     }
 
-    // Register dummy heuristic agent
+    // Always register the dummy heuristic as a baseline
     let dummy = DummyAgent::new(tables.clone());
     println!("Registered model: {}", dummy.name());
     registry.register(Arc::new(dummy));
 
     let registry = Arc::new(registry);
 
-    // Spawn an agent game loop for each registered model
-    let move_interval = Duration::from_millis(500);
+    let move_interval = Duration::from_millis(config.move_interval_ms);
     for (name, model) in registry.iter() {
         println!("Starting game loop for: {name}");
         let agent = model.agent.clone();
@@ -83,34 +75,119 @@ async fn main() {
         model_registry: registry,
     });
 
+    let training_dir = config.training_dir.clone();
+    let frontend_dir = config.frontend_dir.clone();
+
     let app = Router::new()
         .route("/ws", get(websocket_handler))
-        .route("/training_log.jsonl", get(serve_training_log))
-        .route("/training_config.json", get(serve_training_config))
-        .fallback_service(ServeDir::new("../frontend/dist"))
+        .route(
+            "/training_log.jsonl",
+            get(move || serve_latest(training_dir.clone(), "log.jsonl", "application/jsonl")),
+        )
+        .route(
+            "/training_config.json",
+            get(move || {
+                serve_latest(
+                    config.training_dir.clone(),
+                    "config.json",
+                    "application/json",
+                )
+            }),
+        )
+        .fallback_service(ServeDir::new(&frontend_dir))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("[::]:3000").await.unwrap();
-    println!("Server running on http://localhost:3000");
+    let bind_addr = format!("[::]:{}", config.port);
+    let listener = tokio::net::TcpListener::bind(&bind_addr).await.unwrap();
+    println!("\nServer running on http://localhost:{}", config.port);
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn serve_training_log() -> impl IntoResponse {
-    match find_latest("../training", "log.jsonl").await {
-        Some(path) => serve_file(&path, "application/jsonl").await,
-        None => serve_file("../training/training_log.jsonl", "application/jsonl").await,
+/// Scans a directory for .bin model files and loads each one.
+/// Looks for a matching .meta.toml sidecar for name/description.
+fn load_models_from_directory(
+    directory: &Path,
+    tables: &Arc<MoveTables>,
+    registry: &mut ModelRegistry,
+) {
+    let mut entries: Vec<_> = std::fs::read_dir(directory)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().map_or(false, |ext| ext == "bin"))
+        .collect();
+
+    // Sort by filename for consistent ordering
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        let bin_path = entry.path();
+        let stem = bin_path.file_stem().unwrap().to_string_lossy().to_string();
+
+        // Look for a sidecar .meta.toml
+        let meta_path = directory.join(format!("{stem}.meta.toml"));
+        let (name, description) = if meta_path.exists() {
+            let meta_str = std::fs::read_to_string(&meta_path).unwrap();
+            let meta: toml::Value = toml::from_str(&meta_str).unwrap();
+            (
+                meta.get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&stem)
+                    .to_string(),
+                meta.get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        } else {
+            (
+                stem.clone(),
+                format!("N-tuple model loaded from {stem}.bin"),
+            )
+        };
+
+        match NTupleAgent::load(
+            bin_path.to_str().unwrap(),
+            &name,
+            &description,
+            tables.clone(),
+        ) {
+            Ok(agent) => {
+                println!("Loaded model: {}", agent.name());
+                registry.register(Arc::new(agent));
+            }
+            Err(err) => {
+                println!("Failed to load {}: {err}", bin_path.display());
+            }
+        }
     }
 }
 
-async fn serve_training_config() -> impl IntoResponse {
-    match find_latest("../training", "config.json").await {
-        Some(path) => serve_file(&path, "application/json").await,
-        None => serve_file("../training/training_config.json", "application/json").await,
+/// Finds the most recently modified file matching `*.{suffix}` in a directory
+/// and serves it.
+async fn serve_latest(
+    directory: std::path::PathBuf,
+    suffix: &str,
+    content_type: &str,
+) -> axum::response::Response {
+    let latest = find_latest(&directory, suffix).await;
+    match latest {
+        Some(path) => match tokio::fs::read_to_string(&path).await {
+            Ok(contents) => (
+                [(axum::http::header::CONTENT_TYPE, content_type.to_string())],
+                contents,
+            )
+                .into_response(),
+            Err(_) => not_found(),
+        },
+        None => not_found(),
     }
 }
 
-/// Finds the most recently modified file matching `*.{suffix}` in a directory.
-async fn find_latest(directory: &str, suffix: &str) -> Option<String> {
+fn not_found() -> axum::response::Response {
+    (axum::http::StatusCode::NOT_FOUND, "Not found").into_response()
+}
+
+async fn find_latest(directory: &Path, suffix: &str) -> Option<String> {
     let mut entries = tokio::fs::read_dir(directory).await.ok()?;
     let mut latest: Option<(String, std::time::SystemTime)> = None;
 
@@ -128,19 +205,4 @@ async fn find_latest(directory: &str, suffix: &str) -> Option<String> {
     }
 
     latest.map(|(path, _)| path)
-}
-
-async fn serve_file(path: &str, content_type: &str) -> axum::response::Response {
-    match tokio::fs::read_to_string(path).await {
-        Ok(contents) => (
-            [(axum::http::header::CONTENT_TYPE, content_type.to_string())],
-            contents,
-        )
-            .into_response(),
-        Err(_) => (
-            axum::http::StatusCode::NOT_FOUND,
-            format!("File not found: {path}"),
-        )
-            .into_response(),
-    }
 }

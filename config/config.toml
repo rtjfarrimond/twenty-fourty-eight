@@ -1,0 +1,5 @@
+port = 3000
+move_interval_ms = 500
+frontend_dir = "/opt/2048-solver/frontend"
+models_dir = "/var/lib/2048-solver/models"
+training_dir = "/var/lib/2048-solver/training"

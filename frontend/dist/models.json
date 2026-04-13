@@ -1,126 +1,9 @@
 {
   "models": [
     {
-      "model_name": "ntuple-4x6-td0-1M",
-      "model_type": "n-tuple",
-      "description": "N-tuple TD(0), 32 patterns, lr=0.0025, 1M training games.",
-      "training_curve": [
-        {
-          "games_trained": 100000,
-          "avg_score": 13073.392,
-          "max_score": 35668,
-          "tile_2048_pct": 6.5,
-          "tile_4096_pct": 0.0,
-          "tile_8192_pct": 0.0,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 200000,
-          "avg_score": 17690.544,
-          "max_score": 40420,
-          "tile_2048_pct": 21.0,
-          "tile_4096_pct": 0.0,
-          "tile_8192_pct": 0.0,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 300000,
-          "avg_score": 20458.12,
-          "max_score": 66964,
-          "tile_2048_pct": 32.5,
-          "tile_4096_pct": 1.2,
-          "tile_8192_pct": 0.0,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 400000,
-          "avg_score": 23125.756,
-          "max_score": 72528,
-          "tile_2048_pct": 41.3,
-          "tile_4096_pct": 2.1999999999999997,
-          "tile_8192_pct": 0.0,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 500000,
-          "avg_score": 25628.268,
-          "max_score": 76220,
-          "tile_2048_pct": 51.7,
-          "tile_4096_pct": 4.5,
-          "tile_8192_pct": 0.0,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 600000,
-          "avg_score": 27864.696,
-          "max_score": 76952,
-          "tile_2048_pct": 53.400000000000006,
-          "tile_4096_pct": 7.4,
-          "tile_8192_pct": 0.0,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 700000,
-          "avg_score": 29642.836,
-          "max_score": 82428,
-          "tile_2048_pct": 60.5,
-          "tile_4096_pct": 7.1,
-          "tile_8192_pct": 0.0,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 800000,
-          "avg_score": 32603.884,
-          "max_score": 84404,
-          "tile_2048_pct": 67.4,
-          "tile_4096_pct": 13.3,
-          "tile_8192_pct": 0.0,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 900000,
-          "avg_score": 34165.768,
-          "max_score": 107812,
-          "tile_2048_pct": 69.3,
-          "tile_4096_pct": 14.8,
-          "tile_8192_pct": 0.1,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        },
-        {
-          "games_trained": 1000000,
-          "avg_score": 35610.344,
-          "max_score": 124464,
-          "tile_2048_pct": 69.6,
-          "tile_4096_pct": 18.7,
-          "tile_8192_pct": 0.4,
-          "tile_16384_pct": 0.0,
-          "tile_32768_pct": 0.0
-        }
-      ],
-      "final_eval": {
-        "games_trained": 0,
-        "avg_score": 36712.84,
-        "max_score": 136332,
-        "tile_2048_pct": 73.0,
-        "tile_4096_pct": 19.7,
-        "tile_8192_pct": 0.4,
-        "tile_16384_pct": 0.0,
-        "tile_32768_pct": 0.0
-      }
-    },
-    {
       "model_name": "ntuple-4x6-td0-100K",
       "model_type": "n-tuple",
-      "description": "N-tuple TD(0), 32 patterns, lr=0.0025, 100K training games.",
+      "description": "N-tuple model loaded from ntuple-4x6-td0-100K.bin",
       "training_curve": [
         {
           "games_trained": 10000,
@@ -225,9 +108,141 @@
       ],
       "final_eval": {
         "games_trained": 0,
-        "avg_score": 12860.284,
-        "max_score": 36156,
-        "tile_2048_pct": 6.0,
+        "avg_score": 12797.804,
+        "max_score": 33188,
+        "tile_2048_pct": 5.3,
+        "tile_4096_pct": 0.0,
+        "tile_8192_pct": 0.0,
+        "tile_16384_pct": 0.0,
+        "tile_32768_pct": 0.0
+      }
+    },
+    {
+      "model_name": "ntuple-4x6-td0-1M",
+      "model_type": "n-tuple",
+      "description": "N-tuple model loaded from ntuple-4x6-td0-1M.bin",
+      "training_curve": [
+        {
+          "games_trained": 100000,
+          "avg_score": 13073.392,
+          "max_score": 35668,
+          "tile_2048_pct": 6.5,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 200000,
+          "avg_score": 17690.544,
+          "max_score": 40420,
+          "tile_2048_pct": 21.0,
+          "tile_4096_pct": 0.0,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 300000,
+          "avg_score": 20458.12,
+          "max_score": 66964,
+          "tile_2048_pct": 32.5,
+          "tile_4096_pct": 1.2,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 400000,
+          "avg_score": 23125.756,
+          "max_score": 72528,
+          "tile_2048_pct": 41.3,
+          "tile_4096_pct": 2.1999999999999997,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 500000,
+          "avg_score": 25628.268,
+          "max_score": 76220,
+          "tile_2048_pct": 51.7,
+          "tile_4096_pct": 4.5,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 600000,
+          "avg_score": 27864.696,
+          "max_score": 76952,
+          "tile_2048_pct": 53.400000000000006,
+          "tile_4096_pct": 7.4,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 700000,
+          "avg_score": 29642.836,
+          "max_score": 82428,
+          "tile_2048_pct": 60.5,
+          "tile_4096_pct": 7.1,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 800000,
+          "avg_score": 32603.884,
+          "max_score": 84404,
+          "tile_2048_pct": 67.4,
+          "tile_4096_pct": 13.3,
+          "tile_8192_pct": 0.0,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 900000,
+          "avg_score": 34165.768,
+          "max_score": 107812,
+          "tile_2048_pct": 69.3,
+          "tile_4096_pct": 14.8,
+          "tile_8192_pct": 0.1,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        },
+        {
+          "games_trained": 1000000,
+          "avg_score": 35610.344,
+          "max_score": 124464,
+          "tile_2048_pct": 69.6,
+          "tile_4096_pct": 18.7,
+          "tile_8192_pct": 0.4,
+          "tile_16384_pct": 0.0,
+          "tile_32768_pct": 0.0
+        }
+      ],
+      "final_eval": {
+        "games_trained": 0,
+        "avg_score": 36942.96,
+        "max_score": 121364,
+        "tile_2048_pct": 74.0,
+        "tile_4096_pct": 19.5,
+        "tile_8192_pct": 0.1,
+        "tile_16384_pct": 0.0,
+        "tile_32768_pct": 0.0
+      }
+    },
+    {
+      "model_name": "ntuple-4x6-td0-v1",
+      "model_type": "n-tuple",
+      "description": "N-tuple model loaded from ntuple-4x6-td0-v1.bin",
+      "final_eval": {
+        "games_trained": 0,
+        "avg_score": 13037.852,
+        "max_score": 36096,
+        "tile_2048_pct": 6.9,
         "tile_4096_pct": 0.0,
         "tile_8192_pct": 0.0,
         "tile_16384_pct": 0.0,
@@ -240,8 +255,8 @@
       "description": "Baseline heuristic: prefers Down, Right, Left, Up in that order.",
       "final_eval": {
         "games_trained": 0,
-        "avg_score": 2594.648,
-        "max_score": 7496,
+        "avg_score": 2542.376,
+        "max_score": 7592,
         "tile_2048_pct": 0.0,
         "tile_4096_pct": 0.0,
         "tile_8192_pct": 0.0,

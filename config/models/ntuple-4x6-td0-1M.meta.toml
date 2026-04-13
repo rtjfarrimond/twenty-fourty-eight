@@ -1,0 +1,2 @@
+name = "ntuple-4x6-td0-1M"
+description = "N-tuple network (4 base 6-tuple patterns) trained with TD(0) and afterstate value functions. 1M training games. Avg score ~35K, reaches 2048 in ~70% of games."

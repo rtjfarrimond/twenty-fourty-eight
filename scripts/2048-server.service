@@ -1,0 +1,13 @@
+[Unit]
+Description=2048 RL Solver Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/2048-solver/bin/server /etc/2048-solver/config.toml
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

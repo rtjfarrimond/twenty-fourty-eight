@@ -1,6 +1,7 @@
 use game_engine::MoveTables;
 use serde::Serialize;
 use std::fs;
+use std::path::{Path, PathBuf};
 use training::eval;
 use training::eval_dummy;
 use training::ntuple::NTupleNetwork;
@@ -20,67 +21,91 @@ struct ModelsManifest {
     models: Vec<ModelEntry>,
 }
 
-struct TrainedModel {
-    bin_path: String,
-    name: String,
-    description: String,
-    log_path: Option<String>,
-}
-
 fn main() {
     let eval_games: u32 = 1000;
+
+    // Models dir: first arg, or current directory
+    let models_dir = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    // Output path: second arg, or models_dir/../frontend/models.json,
+    // or fall back to /opt/2048-solver/frontend/models.json
+    let output_path = std::env::args()
+        .nth(2)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let default_fhs = PathBuf::from("/opt/2048-solver/frontend/models.json");
+            if default_fhs.parent().unwrap().exists() {
+                default_fhs
+            } else {
+                models_dir.join("../frontend/dist/models.json")
+            }
+        });
+
+    // Training logs dir: third arg, or /var/lib/2048-solver/training,
+    // or fall back to models_dir (for dev)
+    let training_dir = std::env::args()
+        .nth(3)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let default_fhs = PathBuf::from("/var/lib/2048-solver/training");
+            if default_fhs.exists() {
+                default_fhs
+            } else {
+                models_dir.clone()
+            }
+        });
+
+    println!("Models dir: {}", models_dir.display());
+    println!("Output: {}", output_path.display());
+    println!("Training logs: {}", training_dir.display());
+    println!();
+
     let tables = MoveTables::new();
     let mut models = Vec::new();
 
-    // Define trained models to include
-    let trained_models = vec![
-        TrainedModel {
-            bin_path: "ntuple-4x6-td0-1M.bin".to_string(),
-            name: "ntuple-4x6-td0-1M".to_string(),
-            description: "N-tuple TD(0), 32 patterns, lr=0.0025, 1M training games.".to_string(),
-            log_path: Some("ntuple-4x6-td0-1M.log.jsonl".to_string()),
-        },
-        TrainedModel {
-            bin_path: "ntuple-4x6-td0-100K.bin".to_string(),
-            name: "ntuple-4x6-td0-100K".to_string(),
-            description: "N-tuple TD(0), 32 patterns, lr=0.0025, 100K training games.".to_string(),
-            log_path: Some("ntuple-4x6-td0-100K.log.jsonl".to_string()),
-        },
-    ];
+    // Scan for .bin files in the models directory
+    if models_dir.exists() {
+        let mut bin_files: Vec<_> = fs::read_dir(&models_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().extension().map_or(false, |ext| ext == "bin"))
+            .collect();
 
-    for trained in &trained_models {
-        if !std::path::Path::new(&trained.bin_path).exists() {
-            println!("  Skipping {} (file not found)", trained.bin_path);
-            continue;
+        bin_files.sort_by_key(|entry| entry.file_name());
+
+        for entry in bin_files {
+            let bin_path = entry.path();
+            let stem = bin_path.file_stem().unwrap().to_string_lossy().to_string();
+
+            // Load metadata from sidecar .meta.toml
+            let meta_path = models_dir.join(format!("{stem}.meta.toml"));
+            let (name, description) = load_metadata(&meta_path, &stem);
+
+            // Look for training log
+            let log_path = training_dir.join(format!("{stem}.log.jsonl"));
+            let training_curve = load_training_curve(&log_path);
+
+            println!("Evaluating {name} ({eval_games} games)...");
+            let network = NTupleNetwork::load(bin_path.to_str().unwrap())
+                .unwrap_or_else(|err| panic!("Failed to load {}: {err}", bin_path.display()));
+
+            let final_eval = eval::evaluate(&network, &tables, eval_games, 0);
+            println!(
+                "  {name}: avg {:.0}, max {}",
+                final_eval.avg_score, final_eval.max_score
+            );
+
+            models.push(ModelEntry {
+                model_name: name,
+                model_type: "n-tuple".to_string(),
+                description,
+                training_curve,
+                final_eval,
+            });
         }
-
-        println!("Evaluating {} ({eval_games} games)...", trained.name);
-        let network = NTupleNetwork::load(&trained.bin_path)
-            .unwrap_or_else(|err| panic!("Failed to load {}: {err}", trained.bin_path));
-
-        let final_eval = eval::evaluate(&network, &tables, eval_games, 0);
-        println!(
-            "  {}: avg {:.0}, max {}",
-            trained.name, final_eval.avg_score, final_eval.max_score
-        );
-
-        // Load training curve from log if available
-        let training_curve = trained.log_path.as_ref().and_then(|path| {
-            fs::read_to_string(path).ok().map(|text| {
-                text.lines()
-                    .filter(|line| !line.is_empty())
-                    .filter_map(|line| serde_json::from_str(line).ok())
-                    .collect()
-            })
-        });
-
-        models.push(ModelEntry {
-            model_name: trained.name.clone(),
-            model_type: "n-tuple".to_string(),
-            description: trained.description.clone(),
-            training_curve,
-            final_eval,
-        });
     }
 
     // Evaluate the dummy heuristic agent
@@ -101,10 +126,45 @@ fn main() {
 
     let manifest = ModelsManifest { models };
     let json = serde_json::to_string_pretty(&manifest).unwrap();
-    let output_path = "../frontend/dist/models.json";
-    fs::write(output_path, &json).expect("Failed to write models.json");
+    fs::write(&output_path, &json).expect("Failed to write models.json");
     println!(
-        "\nWritten {output_path} with {} model(s)",
+        "\nWritten {} with {} model(s)",
+        output_path.display(),
         manifest.models.len()
     );
+}
+
+fn load_metadata(meta_path: &Path, default_name: &str) -> (String, String) {
+    if meta_path.exists() {
+        let meta_str = fs::read_to_string(meta_path).unwrap();
+        let meta: toml::Value = toml::from_str(&meta_str).unwrap();
+        (
+            meta.get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(default_name)
+                .to_string(),
+            meta.get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        )
+    } else {
+        (
+            default_name.to_string(),
+            format!("N-tuple model loaded from {default_name}.bin"),
+        )
+    }
+}
+
+fn load_training_curve(log_path: &Path) -> Option<Vec<eval::EvalResult>> {
+    if !log_path.exists() {
+        return None;
+    }
+    let text = fs::read_to_string(log_path).ok()?;
+    let curve: Vec<eval::EvalResult> = text
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    if curve.is_empty() { None } else { Some(curve) }
 }
