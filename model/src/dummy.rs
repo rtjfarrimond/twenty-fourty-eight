@@ -23,6 +23,16 @@ impl DummyAgent {
 }
 
 impl Agent for DummyAgent {
+    fn name(&self) -> &str {
+        "heuristic-down-right"
+    }
+
+    fn description(&self) -> &str {
+        "A simple heuristic agent that prefers Down and Right moves, \
+         pushing tiles toward the bottom-right corner. No learning — \
+         serves as a baseline for comparison."
+    }
+
     fn best_move(&self, board: &Board) -> Direction {
         let available = legal_moves(board, &self.tables);
         PRIORITY_ORDER

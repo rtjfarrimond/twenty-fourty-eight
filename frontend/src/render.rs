@@ -95,6 +95,33 @@ pub fn render_play_hint(document: &Document, playing: bool) {
     }
 }
 
+/// Renders model description to the left of the board.
+pub fn render_model_description(document: &Document, description: &str) {
+    if let Some(element) = document.get_element_by_id("model-description") {
+        element.set_text_content(Some(description));
+        let display = if description.is_empty() { "none" } else { "block" };
+        element
+            .set_attribute("style", &format!("display:{display}"))
+            .unwrap();
+    }
+}
+
+/// Populates the model selector dropdown.
+pub fn render_model_list(
+    document: &Document,
+    models: &[crate::protocol::ModelInfo],
+) {
+    if let Some(select) = document.get_element_by_id("model-select") {
+        select.set_inner_html("");
+        for model in models {
+            let option = document.create_element("option").unwrap();
+            option.set_attribute("value", &model.name).unwrap();
+            option.set_text_content(Some(&model.name));
+            select.append_child(&option).unwrap();
+        }
+    }
+}
+
 /// Displays the last move as an arrow symbol.
 pub fn render_last_move(document: &Document, last_move: &Option<String>) {
     if let Some(element) = document.get_element_by_id("last-move") {

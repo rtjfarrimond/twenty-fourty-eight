@@ -23,6 +23,8 @@ const DIRECTIONS: [Direction; 4] = [
 /// An n-tuple network agent loaded from a binary model file.
 /// Uses the same isomorphic evaluation as the training code.
 pub struct NTupleAgent {
+    agent_name: String,
+    agent_description: String,
     masks: Vec<u64>,
     weights: Vec<f32>,
     table_size: usize,
@@ -31,7 +33,12 @@ pub struct NTupleAgent {
 
 impl NTupleAgent {
     /// Loads a model from a binary file produced by the training binary.
-    pub fn load(path: &str, tables: Arc<MoveTables>) -> std::io::Result<Self> {
+    pub fn load(
+        path: &str,
+        name: &str,
+        description: &str,
+        tables: Arc<MoveTables>,
+    ) -> std::io::Result<Self> {
         use std::io::Read;
         let mut file = std::io::BufReader::new(std::fs::File::open(path)?);
 
@@ -56,6 +63,8 @@ impl NTupleAgent {
         }
 
         Ok(Self {
+            agent_name: name.to_string(),
+            agent_description: description.to_string(),
             masks,
             weights,
             table_size,
@@ -115,6 +124,14 @@ impl NTupleAgent {
 }
 
 impl Agent for NTupleAgent {
+    fn name(&self) -> &str {
+        &self.agent_name
+    }
+
+    fn description(&self) -> &str {
+        &self.agent_description
+    }
+
     fn best_move(&self, board: &Board) -> Direction {
         let afterstates = all_afterstates(board, &self.tables);
         let mut best_direction = Direction::Down;

@@ -147,6 +147,24 @@
             font-size: 14px;
             text-align: left;
         }
+
+        #model-description {
+            max-width: 200px;
+            color: #776e65;
+            font-size: 13px;
+            line-height: 1.5;
+            text-align: left;
+        }
+
+        #model-select {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 2px solid #bbada0;
+            font-size: 14px;
+            font-family: inherit;
+            background: #fff;
+            color: #776e65;
+        }
     </style>
 </head>
 <body>
@@ -157,10 +175,11 @@
                 <div class="label">Score</div>
                 <div id="score">0</div>
             </div>
-            <button id="watch-agent-btn">Watch Agent</button>
+            <select id="model-select"></select>
             <button id="new-game-btn">Play</button>
         </div>
         <div class="game-area">
+            <div id="model-description"></div>
             <div class="board">
                 <div id="grid"></div>
                 <div id="game-over">Game Over</div>

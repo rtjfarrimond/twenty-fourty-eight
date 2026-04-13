@@ -4,12 +4,13 @@ use axum::response::IntoResponse;
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
 
+use crate::model_registry::ModelRegistry;
 use crate::protocol::{ClientMessage, ServerMessage, board_to_tile_values, direction_to_string};
 use crate::session::SessionManager;
 
 pub struct AppState {
     pub session_manager: Arc<Mutex<SessionManager>>,
-    pub agent_broadcast: broadcast::Sender<String>,
+    pub model_registry: Arc<ModelRegistry>,
 }
 
 pub async fn websocket_handler(
@@ -23,8 +24,23 @@ async fn handle_connection(mut socket: WebSocket, state: Arc<AppState>) {
     let mut session_id: Option<String> = None;
     let mut agent_receiver: Option<broadcast::Receiver<String>> = None;
 
+    // Send model list on connect
+    let model_list = ServerMessage::ModelList {
+        models: state.model_registry.list(),
+    };
+    let json = serde_json::to_string(&model_list).unwrap();
+    if socket.send(Message::Text(json.into())).await.is_err() {
+        return;
+    }
+
+    // Auto-watch the default model
+    if let Some(default_name) = state.model_registry.default_model() {
+        if let Some(model) = state.model_registry.get(default_name) {
+            agent_receiver = Some(model.sender.subscribe());
+        }
+    }
+
     loop {
-        // If watching the agent, forward broadcasts to the client
         if let Some(ref mut receiver) = agent_receiver {
             tokio::select! {
                 result = receiver.recv() => {
@@ -42,10 +58,7 @@ async fn handle_connection(mut socket: WebSocket, state: Arc<AppState>) {
                     match incoming {
                         Some(Ok(Message::Text(text))) => {
                             if let Some(response) = handle_client_message(
-                                &text,
-                                &mut session_id,
-                                &mut agent_receiver,
-                                &state,
+                                &text, &mut session_id, &mut agent_receiver, &state,
                             ).await {
                                 let json = serde_json::to_string(&response).unwrap();
                                 if socket.send(Message::Text(json.into())).await.is_err() {
@@ -59,7 +72,6 @@ async fn handle_connection(mut socket: WebSocket, state: Arc<AppState>) {
                 }
             }
         } else {
-            // Not watching agent — just handle client messages
             match socket.recv().await {
                 Some(Ok(Message::Text(text))) => {
                     if let Some(response) =
@@ -78,7 +90,6 @@ async fn handle_connection(mut socket: WebSocket, state: Arc<AppState>) {
         }
     }
 
-    // Clean up session on disconnect
     if let Some(session_id) = session_id {
         state
             .session_manager
@@ -95,17 +106,24 @@ async fn handle_client_message(
     state: &AppState,
 ) -> Option<ServerMessage> {
     match serde_json::from_str::<ClientMessage>(text) {
-        Ok(ClientMessage::WatchAgent) => {
-            // Stop any active user game
+        Ok(ClientMessage::ListModels) => Some(ServerMessage::ModelList {
+            models: state.model_registry.list(),
+        }),
+        Ok(ClientMessage::WatchAgent { model }) => {
             if let Some(old_id) = session_id.take() {
                 state.session_manager.lock().await.remove_session(&old_id);
             }
-            // Subscribe to agent broadcast
-            *agent_receiver = Some(state.agent_broadcast.subscribe());
-            None // State will arrive via the broadcast channel
+            match state.model_registry.get(&model) {
+                Some(registered) => {
+                    *agent_receiver = Some(registered.sender.subscribe());
+                    None
+                }
+                None => Some(ServerMessage::Error {
+                    message: format!("Unknown model: {model}"),
+                }),
+            }
         }
         Ok(ClientMessage::NewGame) => {
-            // Stop watching agent if we were
             *agent_receiver = None;
 
             let mut manager = state.session_manager.lock().await;

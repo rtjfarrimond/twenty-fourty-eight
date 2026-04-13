@@ -6,7 +6,13 @@ use serde::{Deserialize, Serialize};
 pub enum ClientMessage {
     NewGame,
     Move { direction: String },
-    WatchAgent,
+    WatchAgent { model: String },
+}
+
+#[derive(Deserialize, Clone)]
+pub struct ModelInfo {
+    pub name: String,
+    pub description: String,
 }
 
 /// Messages received from the server.
@@ -19,6 +25,9 @@ pub enum ServerMessage {
         game_over: bool,
         #[serde(default)]
         last_move: Option<String>,
+    },
+    ModelList {
+        models: Vec<ModelInfo>,
     },
     Error {
         message: String,
@@ -37,7 +46,10 @@ impl ClientMessage {
         .unwrap()
     }
 
-    pub fn watch_agent() -> String {
-        serde_json::to_string(&ClientMessage::WatchAgent).unwrap()
+    pub fn watch_agent(model: &str) -> String {
+        serde_json::to_string(&ClientMessage::WatchAgent {
+            model: model.to_string(),
+        })
+        .unwrap()
     }
 }

@@ -1,4 +1,5 @@
 mod agent_loop;
+mod model_registry;
 mod protocol;
 mod session;
 mod websocket;
@@ -7,12 +8,14 @@ use axum::Router;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use game_engine::MoveTables;
+use model::Agent;
 use model::dummy::DummyAgent;
 use model::ntuple_agent::NTupleAgent;
+use model_registry::ModelRegistry;
 use session::SessionManager;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 use tower_http::services::ServeDir;
 use websocket::{AppState, websocket_handler};
 
@@ -21,33 +24,51 @@ async fn main() {
     let tables = Arc::new(MoveTables::new());
     let session_manager = Arc::new(Mutex::new(SessionManager::new(tables.clone())));
 
-    let (agent_broadcast, _) = broadcast::channel(16);
+    let mut registry = ModelRegistry::new();
 
+    // Register trained n-tuple model if available
     let model_path = "../training/ntuple-4x6-td0-v1.bin";
-    let agent: Arc<dyn model::Agent + Send + Sync> =
-        match NTupleAgent::load(model_path, tables.clone()) {
-            Ok(ntuple_agent) => {
-                println!("Loaded trained model from {model_path}");
-                Arc::new(ntuple_agent)
-            }
-            Err(err) => {
-                println!("No trained model found ({err}), using dummy agent");
-                Arc::new(DummyAgent::new(tables.clone()))
-            }
-        };
-    let move_interval = Duration::from_millis(500);
+    match NTupleAgent::load(
+        model_path,
+        "ntuple-4x6-td0-v1",
+        "N-tuple network (4 base 6-tuple patterns) trained with TD(0) \
+         and afterstate value functions. 100K training games.",
+        tables.clone(),
+    ) {
+        Ok(agent) => {
+            println!("Loaded trained model: {}", agent.name());
+            registry.register(Arc::new(agent));
+        }
+        Err(err) => {
+            println!("No trained model at {model_path}: {err}");
+        }
+    }
 
-    let broadcast_sender = agent_broadcast.clone();
-    tokio::spawn(agent_loop::run_agent_loop(
-        agent,
-        tables,
-        broadcast_sender,
-        move_interval,
-    ));
+    // Register dummy heuristic agent
+    let dummy = DummyAgent::new(tables.clone());
+    println!("Registered model: {}", dummy.name());
+    registry.register(Arc::new(dummy));
+
+    let registry = Arc::new(registry);
+
+    // Spawn an agent game loop for each registered model
+    let move_interval = Duration::from_millis(500);
+    for (name, model) in registry.iter() {
+        println!("Starting game loop for: {name}");
+        let agent = model.agent.clone();
+        let sender = model.sender.clone();
+        let tables = tables.clone();
+        tokio::spawn(agent_loop::run_agent_loop(
+            agent,
+            tables,
+            sender,
+            move_interval,
+        ));
+    }
 
     let state = Arc::new(AppState {
         session_manager,
-        agent_broadcast,
+        model_registry: registry,
     });
 
     let app = Router::new()

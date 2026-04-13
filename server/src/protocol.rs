@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 pub enum ClientMessage {
     NewGame,
     Move { direction: ClientDirection },
-    WatchAgent,
+    WatchAgent { model: String },
+    ListModels,
 }
 
 /// Direction as received from the client (serialization-friendly).
@@ -42,9 +43,18 @@ pub enum ServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         last_move: Option<String>,
     },
+    ModelList {
+        models: Vec<ModelInfo>,
+    },
     Error {
         message: String,
     },
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModelInfo {
+    pub name: String,
+    pub description: String,
 }
 
 pub fn direction_to_string(direction: &game_engine::Direction) -> String {
