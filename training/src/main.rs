@@ -33,6 +33,10 @@ struct Args {
     #[arg(long, default_value_t = 0.0)]
     optimistic_init: f32,
 
+    /// Pattern preset: "4x6" (4 base 6-tuples) or "8x6" (8 base 6-tuples)
+    #[arg(long, default_value = "4x6")]
+    patterns: String,
+
     /// Learning rate for TD(0) updates
     #[arg(long, default_value_t = 0.0025)]
     learning_rate: f32,
@@ -48,13 +52,34 @@ struct Args {
 }
 
 /// Standard 4-pattern 6-tuple configuration from the literature.
-fn standard_6tuple_patterns() -> Vec<Vec<(usize, usize)>> {
+fn patterns_4x6() -> Vec<Vec<(usize, usize)>> {
     vec![
         vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)],
         vec![(1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1)],
         vec![(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)],
         vec![(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)],
     ]
+}
+
+/// Stronger 8-pattern 6-tuple configuration (adds 4 more L/rectangle shapes).
+/// From RESEARCH.md — flat indices converted to (row, col).
+fn patterns_8x6() -> Vec<Vec<(usize, usize)>> {
+    let mut patterns = patterns_4x6();
+    patterns.extend(vec![
+        vec![(0, 0), (0, 1), (1, 1), (1, 2), (1, 3), (2, 2)],
+        vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (2, 1)],
+        vec![(0, 0), (0, 1), (0, 2), (1, 1), (2, 1), (2, 2)],
+        vec![(0, 0), (0, 1), (1, 1), (1, 2), (2, 1), (3, 1)],
+    ]);
+    patterns
+}
+
+fn select_patterns(preset: &str) -> Vec<Vec<(usize, usize)>> {
+    match preset {
+        "4x6" => patterns_4x6(),
+        "8x6" => patterns_8x6(),
+        other => panic!("Unknown pattern preset: {other}. Expected 4x6 or 8x6."),
+    }
 }
 
 /// Written alongside the JSONL log so the dashboard knows the training config.
@@ -76,7 +101,7 @@ fn main() {
     let log_path = format!("{}.log.jsonl", args.model_name);
     let config_path = format!("{}.config.json", args.model_name);
 
-    let patterns = standard_6tuple_patterns();
+    let patterns = select_patterns(&args.patterns);
 
     let config = TrainingConfig {
         model_name: args.model_name.clone(),
@@ -100,7 +125,8 @@ fn main() {
     println!("  Learning rate: {}", args.learning_rate);
     println!("  Optimistic init: {}", args.optimistic_init);
     println!(
-        "  Patterns: {} base x 8 symmetries = {}",
+        "  Patterns: {} ({} base x 8 symmetries = {})",
+        args.patterns,
         patterns.len(),
         patterns.len() * 8
     );
@@ -182,9 +208,9 @@ fn deploy_model(
 
     let description = args.description.clone().unwrap_or_else(|| {
         format!(
-            "N-tuple network (4 base 6-tuple patterns) trained with TD(0). \
+            "N-tuple network ({} preset) trained with TD(0). \
              {} training games, lr={}, optimistic_init={}.",
-            args.games, args.learning_rate, args.optimistic_init
+            args.patterns, args.games, args.learning_rate, args.optimistic_init
         )
     });
 

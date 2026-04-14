@@ -320,6 +320,27 @@ the server directory works without any config for local development.
 
 ---
 
+## 16. Results Table Schema
+
+**Decision:** Shared results views (table, comparisons) only display metrics
+that generalize across agent types. Algorithm-specific training
+hyperparameters live in per-model descriptions, not as table columns.
+
+**Rationale:**
+- Universal metrics — average score, max score, tile-reach percentages — are
+  comparable across any agent, from heuristics to n-tuple TD to expectimax +
+  endgame tablebases.
+- N-tuple hyperparameters (learning rate, optimistic init, pattern set,
+  multi-stage config, TC learning state) do not apply to other algorithms.
+  Promoting them to columns would leave empty cells for heuristic and
+  search-based agents, and force schema churn every time a new algorithm is
+  added.
+- Per-model descriptions (or a detail view) are the right place for
+  algorithm-specific context — they scale with agent diversity without
+  distorting the shared comparison surface.
+
+---
+
 **Remaining polish items:**
 - Tile sliding animations (requires client-side state diffing)
 - Replace unicode arrow characters with SVG/icon font for consistent
