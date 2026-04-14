@@ -5,9 +5,10 @@ use std::path::PathBuf;
 use clap::Parser;
 use game_engine::MoveTables;
 use serde::Serialize;
+use training::config::{select_patterns, validate_algorithm};
 use training::eval;
 use training::ntuple::NTupleNetwork;
-use training::training::train_one_game;
+use training::training::{train_hogwild_batch, train_one_game};
 
 /// Train an n-tuple network for 2048 using TD(0) with afterstate values.
 #[derive(Parser)]
@@ -49,37 +50,15 @@ struct Args {
     /// Human-readable description for the .meta.toml sidecar
     #[arg(long)]
     description: Option<String>,
-}
 
-/// Standard 4-pattern 6-tuple configuration from the literature.
-fn patterns_4x6() -> Vec<Vec<(usize, usize)>> {
-    vec![
-        vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)],
-        vec![(1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1)],
-        vec![(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)],
-        vec![(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)],
-    ]
-}
+    /// Training algorithm: "serial" (single-threaded) or "hogwild" (lock-free
+    /// shared-memory parallelism). Hogwild not yet implemented.
+    #[arg(long, default_value = "serial")]
+    algorithm: String,
 
-/// Stronger 8-pattern 6-tuple configuration (adds 4 more L/rectangle shapes).
-/// From RESEARCH.md — flat indices converted to (row, col).
-fn patterns_8x6() -> Vec<Vec<(usize, usize)>> {
-    let mut patterns = patterns_4x6();
-    patterns.extend(vec![
-        vec![(0, 0), (0, 1), (1, 1), (1, 2), (1, 3), (2, 2)],
-        vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (2, 1)],
-        vec![(0, 0), (0, 1), (0, 2), (1, 1), (2, 1), (2, 2)],
-        vec![(0, 0), (0, 1), (1, 1), (1, 2), (2, 1), (3, 1)],
-    ]);
-    patterns
-}
-
-fn select_patterns(preset: &str) -> Vec<Vec<(usize, usize)>> {
-    match preset {
-        "4x6" => patterns_4x6(),
-        "8x6" => patterns_8x6(),
-        other => panic!("Unknown pattern preset: {other}. Expected 4x6 or 8x6."),
-    }
+    /// Number of worker threads. Must be 1 for the serial algorithm.
+    #[arg(long, default_value_t = 1)]
+    threads: u32,
 }
 
 /// Written alongside the JSONL log so the dashboard knows the training config.
@@ -93,10 +72,14 @@ struct TrainingConfig {
     learning_rate: f32,
     num_base_patterns: usize,
     num_total_patterns: usize,
+    algorithm: String,
+    num_threads: u32,
 }
 
 fn main() {
     let args = Args::parse();
+
+    validate_algorithm(&args.algorithm, args.threads);
 
     let log_path = format!("{}.log.jsonl", args.model_name);
     let config_path = format!("{}.config.json", args.model_name);
@@ -112,6 +95,8 @@ fn main() {
         learning_rate: args.learning_rate,
         num_base_patterns: patterns.len(),
         num_total_patterns: patterns.len() * 8,
+        algorithm: args.algorithm.clone(),
+        num_threads: args.threads,
     };
 
     let config_json = serde_json::to_string_pretty(&config).unwrap();
@@ -130,6 +115,7 @@ fn main() {
         patterns.len(),
         patterns.len() * 8
     );
+    println!("  Algorithm: {} ({} thread(s))", args.algorithm, args.threads);
     println!("  Log file: {log_path}");
     println!("  Config file: {config_path}");
     if let Some(ref dir) = args.models_dir {
@@ -138,35 +124,12 @@ fn main() {
     println!();
 
     let tables = MoveTables::new();
-    let mut network =
-        NTupleNetwork::with_symmetry_expansion(&patterns, args.optimistic_init);
-    let mut rng = rand::rng();
+    let network = NTupleNetwork::with_symmetry_expansion(&patterns, args.optimistic_init);
 
     let log_file = File::create(&log_path).expect("Failed to create log file");
     let mut log_writer = BufWriter::new(log_file);
 
-    for game in 1..=args.games {
-        train_one_game(&mut network, &tables, args.learning_rate, &mut rng);
-
-        if game % args.eval_interval == 0 {
-            let result = eval::evaluate(&network, &tables, args.eval_games, game);
-
-            let json = serde_json::to_string(&result).unwrap();
-            writeln!(log_writer, "{json}").expect("Failed to write log");
-            log_writer.flush().expect("Failed to flush log");
-
-            println!(
-                "Games {game}/{}: avg {:.0}, max {}, \
-                 2048 {:.1}%, 4096 {:.1}%, 8192 {:.1}%",
-                args.games,
-                result.avg_score,
-                result.max_score,
-                result.tile_2048_pct,
-                result.tile_4096_pct,
-                result.tile_8192_pct,
-            );
-        }
-    }
+    run_training(&network, &tables, &args, &mut log_writer);
 
     let model_path = format!("{}.bin", args.model_name);
     network.save(&model_path).expect("Failed to save model");
@@ -177,6 +140,85 @@ fn main() {
     if let Some(ref models_dir) = args.models_dir {
         deploy_model(&args, models_dir, &model_path, &log_path, &config_path);
     }
+}
+
+/// Dispatches to the configured training algorithm. Both paths share the
+/// same eval/logging cadence — the difference is whether each chunk of
+/// `eval_interval` games is played sequentially on one thread or distributed
+/// across `threads` worker threads via Hogwild.
+fn run_training(
+    network: &NTupleNetwork,
+    tables: &MoveTables,
+    args: &Args,
+    log_writer: &mut BufWriter<File>,
+) {
+    match args.algorithm.as_str() {
+        "serial" => run_serial_training(network, tables, args, log_writer),
+        "hogwild" => run_hogwild_training(network, tables, args, log_writer),
+        other => panic!("Unreachable: validate_algorithm should reject {other}"),
+    }
+}
+
+fn run_serial_training(
+    network: &NTupleNetwork,
+    tables: &MoveTables,
+    args: &Args,
+    log_writer: &mut BufWriter<File>,
+) {
+    let mut rng = rand::rng();
+    for game in 1..=args.games {
+        train_one_game(network, tables, args.learning_rate, &mut rng);
+        if game % args.eval_interval == 0 {
+            log_eval_checkpoint(network, tables, args, game, log_writer);
+        }
+    }
+}
+
+fn run_hogwild_training(
+    network: &NTupleNetwork,
+    tables: &MoveTables,
+    args: &Args,
+    log_writer: &mut BufWriter<File>,
+) {
+    let mut games_completed: u32 = 0;
+    while games_completed < args.games {
+        let remaining = args.games - games_completed;
+        let batch_size = remaining.min(args.eval_interval);
+        let batch_seed = 0xC0FFEE_u64 ^ (games_completed as u64);
+        train_hogwild_batch(
+            network,
+            tables,
+            args.learning_rate,
+            args.threads,
+            batch_size,
+            batch_seed,
+        );
+        games_completed += batch_size;
+        log_eval_checkpoint(network, tables, args, games_completed, log_writer);
+    }
+}
+
+fn log_eval_checkpoint(
+    network: &NTupleNetwork,
+    tables: &MoveTables,
+    args: &Args,
+    games_trained: u32,
+    log_writer: &mut BufWriter<File>,
+) {
+    let result = eval::evaluate(network, tables, args.eval_games, games_trained);
+    let json = serde_json::to_string(&result).unwrap();
+    writeln!(log_writer, "{json}").expect("Failed to write log");
+    log_writer.flush().expect("Failed to flush log");
+    println!(
+        "Games {games_trained}/{}: avg {:.0}, max {}, \
+         2048 {:.1}%, 4096 {:.1}%, 8192 {:.1}%",
+        args.games,
+        result.avg_score,
+        result.max_score,
+        result.tile_2048_pct,
+        result.tile_4096_pct,
+        result.tile_8192_pct,
+    );
 }
 
 /// Copies a file, but skips if source and destination resolve to the same path
@@ -208,9 +250,14 @@ fn deploy_model(
 
     let description = args.description.clone().unwrap_or_else(|| {
         format!(
-            "N-tuple network ({} preset) trained with TD(0). \
-             {} training games, lr={}, optimistic_init={}.",
-            args.patterns, args.games, args.learning_rate, args.optimistic_init
+            "N-tuple network ({} preset) trained with TD(0) via {} algorithm \
+             ({} thread(s)). {} training games, lr={}, optimistic_init={}.",
+            args.patterns,
+            args.algorithm,
+            args.threads,
+            args.games,
+            args.learning_rate,
+            args.optimistic_init
         )
     });
 

@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use game_engine::Board;
 
 #[cfg(target_arch = "x86_64")]
@@ -59,11 +61,17 @@ fn build_pext_mask(positions: &[usize]) -> u64 {
 /// - Stores only the base patterns (no symmetry expansion in weights)
 /// - At evaluation time, transforms the board 8 ways using fast bitwise ops
 /// - Extracts tuple indices with a single PEXT instruction per pattern
+///
+/// Weights are stored as `AtomicU32` (reinterpreting f32 bits) so that both
+/// single-threaded and Hogwild-style parallel training can share the same
+/// storage. `Relaxed` ordering compiles to plain MOV on x86 — no overhead
+/// versus a plain `Vec<f32>`. Lock-free racy updates are the intended model
+/// for Hogwild (see DESIGN_DECISIONS §17, FUTURE.md parallel-training entry).
 pub struct NTupleNetwork {
     /// One PEXT mask per base pattern.
     masks: Vec<u64>,
     /// Flat weight storage: masks.len() contiguous weight tables.
-    weights: Vec<f32>,
+    weights: Vec<AtomicU32>,
     /// Size of each weight table (16^6 for 6-tuples).
     table_size: usize,
 }
@@ -87,7 +95,10 @@ impl NTupleNetwork {
             .collect();
 
         let total_weights = base_patterns.len() * table_size;
-        let weights = vec![initial_weight; total_weights];
+        let initial_bits = initial_weight.to_bits();
+        let weights = (0..total_weights)
+            .map(|_| AtomicU32::new(initial_bits))
+            .collect();
 
         Self {
             masks,
@@ -116,28 +127,34 @@ impl NTupleNetwork {
     /// Evaluate base patterns against a single board orientation.
     #[inline(always)]
     fn evaluate_orientation(&self, raw: u64) -> f32 {
-        let weights_ptr = self.weights.as_ptr();
         let mut total = 0.0f32;
         for (pattern_index, &mask) in self.masks.iter().enumerate() {
             let index = pext(raw, mask) as usize;
             let offset = pattern_index * self.table_size + index;
-            unsafe {
-                total += *weights_ptr.add(offset);
-            }
+            // Bounds: offset is pattern_index * table_size + (pext result < table_size)
+            // so it is always < masks.len() * table_size == weights.len().
+            let bits = unsafe { self.weights.get_unchecked(offset) }
+                .load(Ordering::Relaxed);
+            total += f32::from_bits(bits);
         }
         total
     }
 
     /// Update base patterns for a single board orientation.
+    ///
+    /// Uses racy load-modify-store with Relaxed ordering — this is the
+    /// Hogwild semantics. In single-threaded use it is a plain RMW; under
+    /// Hogwild parallelism, concurrent writers may occasionally clobber
+    /// each other's updates, which TD(0) on sparse weight tables tolerates.
     #[inline(always)]
-    fn update_orientation(&mut self, raw: u64, delta: f32) {
-        let weights_ptr = self.weights.as_mut_ptr();
+    fn update_orientation(&self, raw: u64, delta: f32) {
         for (pattern_index, &mask) in self.masks.iter().enumerate() {
             let index = pext(raw, mask) as usize;
             let offset = pattern_index * self.table_size + index;
-            unsafe {
-                *weights_ptr.add(offset) += delta;
-            }
+            let slot = unsafe { self.weights.get_unchecked(offset) };
+            let old_bits = slot.load(Ordering::Relaxed);
+            let new_bits = (f32::from_bits(old_bits) + delta).to_bits();
+            slot.store(new_bits, Ordering::Relaxed);
         }
     }
 
@@ -167,8 +184,13 @@ impl NTupleNetwork {
     }
 
     /// Updates all patterns across all 8 symmetries.
+    ///
+    /// Takes `&self` (not `&mut self`) because weights are interior-mutable
+    /// via atomics. This is what enables multi-threaded Hogwild training:
+    /// an `Arc<NTupleNetwork>` or a scope-shared `&NTupleNetwork` can be
+    /// passed to many worker threads simultaneously.
     #[inline]
-    pub fn update(&mut self, board: &Board, delta: f32) {
+    pub fn update(&self, board: &Board, delta: f32) {
         let orientations = Self::orientations(board.raw());
         let per_symmetry_delta = delta / (self.masks.len() * 8) as f32;
         for &oriented in &orientations {
@@ -182,6 +204,8 @@ impl NTupleNetwork {
 
     /// Saves the network to a binary file.
     /// Format: [num_masks: u32] [masks: u64...] [weights: f32...]
+    /// Weights are written as f32 bytes (reinterpreted from the underlying
+    /// AtomicU32 storage) so the on-disk format is unchanged.
     pub fn save(&self, path: &str) -> std::io::Result<()> {
         use std::io::Write;
         let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
@@ -190,8 +214,9 @@ impl NTupleNetwork {
         for &mask in &self.masks {
             file.write_all(&mask.to_le_bytes())?;
         }
-        for &weight in &self.weights {
-            file.write_all(&weight.to_le_bytes())?;
+        for weight in &self.weights {
+            let bits = weight.load(Ordering::Relaxed);
+            file.write_all(&bits.to_le_bytes())?;
         }
         file.flush()
     }
@@ -218,7 +243,7 @@ impl NTupleNetwork {
         let mut weights = Vec::with_capacity(total_weights);
         for _ in 0..total_weights {
             file.read_exact(&mut buf4)?;
-            weights.push(f32::from_le_bytes(buf4));
+            weights.push(AtomicU32::new(u32::from_le_bytes(buf4)));
         }
 
         Ok(Self {
@@ -277,7 +302,7 @@ mod tests {
     #[test]
     fn network_update_changes_evaluation() {
         let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
-        let mut network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
 
         let mut board = Board::new();
         board.set_tile(0, 0, 1);
@@ -291,9 +316,22 @@ mod tests {
     }
 
     #[test]
+    fn update_is_callable_via_shared_reference() {
+        // This test would fail to compile if update still took &mut self.
+        // It's the contract that makes Hogwild possible.
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
+        let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+
+        let shared_ref: &NTupleNetwork = &network;
+        let board = Board::new();
+        shared_ref.update(&board, 10.0);
+        assert!(shared_ref.evaluate(&board) != 0.0);
+    }
+
+    #[test]
     fn network_differentiates_board_states() {
         let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
-        let mut network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
 
         let mut board_a = Board::new();
         board_a.set_tile(0, 0, 1);
@@ -341,18 +379,18 @@ mod tests {
             vec![(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)],
             vec![(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)],
         ];
-        let mut network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
         let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
 
         let mut early_scores = Vec::new();
         let mut late_scores = Vec::new();
 
         for game in 0..2000 {
-            let score = train_one_game(&mut network, &tables, 0.0025, &mut rng);
+            let result = train_one_game(&network, &tables, 0.0025, &mut rng);
             if game < 100 {
-                early_scores.push(score);
+                early_scores.push(result.score);
             } else if game >= 1900 {
-                late_scores.push(score);
+                late_scores.push(result.score);
             }
         }
 

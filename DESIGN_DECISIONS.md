@@ -341,6 +341,44 @@ hyperparameters live in per-model descriptions, not as table columns.
 
 ---
 
+## 17. SotA Dimensions
+
+**Decision:** We pursue SotA on *multiple* independent axes. Training speed
+is a first-class goal, not plumbing underneath the model work.
+
+**Axes we care about:**
+1. **Solver quality** — avg score, tile-reach rates (2048/4096/8192/16384/
+   32768) at a given training budget. The headline metric.
+2. **Training throughput** — games/sec, moves/sec during training, wall-clock
+   time to reach a target performance bar. Iteration speed compounds: every
+   doubling of training throughput doubles the experiments runnable per
+   calendar day.
+3. **Training sample efficiency** — games needed to reach a given
+   performance bar. Orthogonal to throughput (algorithm vs. infrastructure).
+   Improvements here (TC learning, multi-stage, better TD variants) reduce
+   training cost more fundamentally than parallelism does.
+4. **Inference throughput** — moves/sec during play. Reference:
+   moporgic/TDL2048 reports 102M moves/sec on Ryzen 9.
+5. **Memory footprint** — weight table size for a given pattern complexity.
+   Affects deployment, portability, and cache behavior at inference time.
+
+**Metrics we track:**
+- Training: games/sec, moves/sec, wall-clock hours to N million games, core
+  scaling efficiency (speedup ÷ cores used).
+- Sample efficiency: games required to hit avg-score or tile-reach
+  thresholds, across algorithm variants on fixed seeds.
+- Inference: moves/sec single- and multi-threaded, p99 move latency.
+- Quality: avg score over 1000 eval games (fixed seed), tile-reach %.
+- Memory: RSS peak during training, artefact size on disk.
+
+**Rationale:** A system that reaches SotA quality in 10× the wall-clock time
+is not SotA — it is reproducing published results slowly. "Fastest-to-SotA"
+is a real dimension of the problem. Treating parallelism as a boring
+substrate hides the fact that training throughput gates every experiment we
+can run; it deserves the same design rigor as model architecture.
+
+---
+
 **Remaining polish items:**
 - Tile sliding animations (requires client-side state diffing)
 - Replace unicode arrow characters with SVG/icon font for consistent
