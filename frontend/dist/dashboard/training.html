@@ -120,6 +120,7 @@
             padding: 20px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             position: relative;
+            min-width: 0;
         }
 
         .chart-container:fullscreen {
@@ -298,6 +299,9 @@
                 <div class="stat"><div class="label">Max Score</div><div class="value">${latest.max_score.toLocaleString()}</div></div>
                 <div class="stat"><div class="label">2048 Rate</div><div class="value">${latest.tile_2048_pct.toFixed(1)}%</div></div>
                 <div class="stat"><div class="label">4096 Rate</div><div class="value">${latest.tile_4096_pct.toFixed(1)}%</div></div>
+                <div class="stat"><div class="label">8192 Rate</div><div class="value">${latest.tile_8192_pct.toFixed(1)}%</div></div>
+                <div class="stat"><div class="label">16384 Rate</div><div class="value">${latest.tile_16384_pct.toFixed(1)}%</div></div>
+                <div class="stat"><div class="label">32768 Rate</div><div class="value">${latest.tile_32768_pct.toFixed(1)}%</div></div>
             `;
         }
 
@@ -384,6 +388,10 @@
         document.addEventListener('fullscreenchange', () => {
             document.querySelectorAll('.fullscreen-btn').forEach(btn => {
                 btn.textContent = document.fullscreenElement === btn.parentElement ? 'Exit' : 'Expand';
+            });
+            requestAnimationFrame(() => {
+                if (scoreChart) scoreChart.resize();
+                if (tileChart) tileChart.resize();
             });
         });
 

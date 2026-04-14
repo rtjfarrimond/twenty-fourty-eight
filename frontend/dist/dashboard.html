@@ -71,6 +71,7 @@
             padding: 20px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             position: relative;
+            min-width: 0;
         }
 
         .chart-container:fullscreen {
@@ -183,6 +184,7 @@
         let allModels = [];
         let sortColumn = 'max_score';
         let sortAsc = false;
+        let activeCharts = [];
 
         async function load() {
             try {
@@ -286,6 +288,8 @@
         function renderCharts(models) {
             const container = document.getElementById('charts-section');
             container.innerHTML = '';
+            activeCharts.forEach(c => c.destroy());
+            activeCharts = [];
 
             const trainedModels = models.filter(m => m.training_curve && m.training_curve.length > 0);
             if (trainedModels.length === 0) return;
@@ -304,17 +308,20 @@
                     </div>
                 </div>`;
 
-            const maxLen = Math.max(...trainedModels.map(m => m.training_curve.length));
-            const longestModel = trainedModels.find(m => m.training_curve.length === maxLen);
-            const labels = longestModel.training_curve.map(e => e.games_trained.toLocaleString());
+            const linearXAxis = {
+                type: 'linear',
+                title: { display: true, text: 'Games Trained' },
+                ticks: {
+                    callback: (value) => Number(value).toLocaleString(),
+                },
+            };
 
-            new Chart(document.getElementById('combined-score-chart'), {
+            const scoreChart = new Chart(document.getElementById('combined-score-chart'), {
                 type: 'line',
                 data: {
-                    labels,
                     datasets: trainedModels.map((model, i) => ({
                         label: model.model_name,
-                        data: model.training_curve.map(e => e.avg_score),
+                        data: model.training_curve.map(e => ({ x: e.games_trained, y: e.avg_score })),
                         borderColor: CHART_COLORS[i % CHART_COLORS.length],
                         fill: false,
                         tension: 0.3,
@@ -322,20 +329,20 @@
                 },
                 options: {
                     responsive: true,
+                    parsing: false,
                     scales: {
-                        x: { title: { display: true, text: 'Games Trained' } },
+                        x: linearXAxis,
                         y: { title: { display: true, text: 'Avg Score' }, beginAtZero: true }
                     }
                 }
             });
 
-            new Chart(document.getElementById('combined-tile-chart'), {
+            const tileChart = new Chart(document.getElementById('combined-tile-chart'), {
                 type: 'line',
                 data: {
-                    labels,
                     datasets: trainedModels.map((model, i) => ({
                         label: model.model_name,
-                        data: model.training_curve.map(e => e.tile_2048_pct),
+                        data: model.training_curve.map(e => ({ x: e.games_trained, y: e.tile_2048_pct })),
                         borderColor: CHART_COLORS[i % CHART_COLORS.length],
                         fill: false,
                         tension: 0.3,
@@ -343,12 +350,15 @@
                 },
                 options: {
                     responsive: true,
+                    parsing: false,
                     scales: {
-                        x: { title: { display: true, text: 'Games Trained' } },
+                        x: linearXAxis,
                         y: { title: { display: true, text: '2048 Reach %' }, beginAtZero: true, max: 100 }
                     }
                 }
             });
+
+            activeCharts = [scoreChart, tileChart];
         }
 
         function toggleFullscreen(element) {
@@ -363,6 +373,7 @@
             document.querySelectorAll('.fullscreen-btn').forEach(btn => {
                 btn.textContent = document.fullscreenElement === btn.parentElement ? 'Exit' : 'Expand';
             });
+            requestAnimationFrame(() => activeCharts.forEach(c => c.resize()));
         });
 
         load();
