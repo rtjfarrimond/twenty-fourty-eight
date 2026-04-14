@@ -242,20 +242,64 @@ by a shared eval data format.
 
 ## 12. Performance Optimization
 
-**Status:** Deferred — to be tackled immediately after dashboard work is complete.
+**Status:** Benchmark harness built; initial Hogwild scaling measured;
+memory bandwidth identified as the current ceiling on training throughput.
 
-**Approach:** Profile first, then fix. No guessing.
-- Build a benchmarking/evaluation framework to measure games/sec and
-  moves/sec.
-- Aim to surpass existing tooling (moporgic/TDL2048 reports 102M moves/sec on
-  Ryzen 9). We are building a best-in-class system.
-- **Known likely bottlenecks** (to be confirmed by profiling):
-  1. N-tuple index computation via repeated `get_tile` calls — should
-     precompute tuple indices directly from 16-bit rows.
-  2. Vec allocations in hot path (`empty_tiles` called every move).
-  3. Naive transpose (16 get/set calls) — should be bitwise.
-- Define a repeatable benchmark suite so we can measure before/after for every
-  optimization.
+**Approach:** Profile first, then fix. No guessing. The `benchmark` binary
+and `BENCHMARKING.md` are the repeatable framework for this.
+
+### Initial scaling measurement (4x6 patterns, AMD EPYC Rome, 16 physical cores)
+
+Single-threaded serial vs. Hogwild at various thread counts, 5000 games:
+
+| Config | Games/sec | Moves/sec | Speedup | Efficiency |
+|---|---|---|---|---|
+| serial-1 | 5,019 | 1.6M | 1.00× | 100% |
+| hogwild-4 | 7,243 | 2.3M | 1.44× | 36% |
+| hogwild-8 | 10,979 | 3.6M | 2.19× | 27% |
+| hogwild-15 | 13,920 | 4.5M | 2.77× | 18% |
+
+### Bottleneck identified: memory bandwidth, not CPU
+
+`perf stat` confirms a memory-stall-dominated hot path, not a CPU-bound
+one:
+
+| Metric | Serial-1 | Hogwild-15 |
+|---|---|---|
+| IPC (instructions per cycle) | 1.24 | 0.33 |
+| CPUs actually utilized | 0.998 | 6.7 / 15 |
+| Cache miss rate | 20% | 30% |
+
+IPC dropping from 1.24 to 0.33 is the textbook signature of memory-bound
+workloads — cores spend 73% of cycles stalled waiting on DRAM. Root cause:
+weight table is 268 MB, L3 cache is only 16 MiB, so every feature lookup
+misses L3. At 15 threads the aggregate DRAM bandwidth demand plateaus.
+
+**Implication:** adding more threads beyond ~8 yields diminishing returns
+on this machine. The ceiling is hardware, not algorithm. 2.77× is the
+realistic current limit without reducing bytes-per-move.
+
+### Where the next wins live (ranked by expected impact)
+
+1. **Reduce bytes per move** — halve memory traffic with f16 weights, or
+   pack weights so one cache line serves more lookups. 2-3× potential.
+   See `FUTURE.md` entry on memory-layout optimization.
+2. **Reduce lookups per move** — algorithmic (e.g. skip evaluation on
+   clearly-dominated afterstates). Smaller gain, harder to do cleanly.
+3. **Faster-memory hardware** — would improve absolute numbers, won't
+   change the shape of the curve.
+4. **Prefetching hints** — PEXT-derived indices make software prefetch
+   hard; hardware prefetcher already does what it can.
+5. **Per-thread batching / delayed merge** — reduces coherence traffic
+   but changes algorithm semantics. Probably <20% gain given the primary
+   bottleneck is raw bandwidth, not coherence.
+
+### Aspirational target
+
+moporgic/TDL2048 reports ~100M moves/sec *inference* on consumer hardware.
+Training moves/sec differs (writes + more computation per move), but the
+gap (4.5M → 100M) is large enough that non-trivial optimization work is
+required to close it. Not today's problem — logged as future work.
 
 ---
 

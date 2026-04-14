@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2048 — Training Benchmarks</title>
+    <link rel="stylesheet" href="/nav.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Clear Sans', 'Helvetica Neue', Arial, sans-serif;
+            background: #faf8ef;
+            padding: 30px;
+            padding-top: 78px;
+            color: #776e65;
+        }
+
+        h1 { font-size: 36px; margin-bottom: 6px; }
+        h2 { font-size: 16px; margin-bottom: 10px; }
+
+        .subtitle {
+            font-size: 14px;
+            margin-bottom: 20px;
+            max-width: 900px;
+        }
+
+        .subtitle a { color: #8f7a66; }
+
+        .meta-bar {
+            background: #bbada0;
+            color: #f9f6f2;
+            padding: 12px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            font-size: 13px;
+        }
+
+        .meta-bar .item { display: flex; gap: 6px; }
+        .meta-bar .label { opacity: 0.8; }
+        .meta-bar .value { font-weight: bold; }
+
+        .charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .chart-container {
+            background: #fff;
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            position: relative;
+            min-width: 0;
+        }
+
+        .chart-container:fullscreen {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .chart-container:fullscreen canvas { max-height: 80vh; }
+
+        .fullscreen-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: 1px solid #bbada0;
+            border-radius: 4px;
+            color: #8f7a66;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 12px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .fullscreen-btn:hover { opacity: 1; }
+
+        .table-container {
+            background: #fff;
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            overflow-x: auto;
+        }
+
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+        th, td {
+            text-align: left;
+            padding: 8px 12px;
+            border-bottom: 1px solid #ede2d3;
+        }
+
+        th {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #8f7a66;
+            font-weight: bold;
+            letter-spacing: 0.05em;
+        }
+
+        td { color: #776e65; }
+
+        td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+
+        tbody tr:hover { background: #faf5eb; }
+
+        .algo-serial { color: #6c7a89; font-weight: bold; }
+        .algo-hogwild { color: #c46d3a; font-weight: bold; }
+
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            background: #fff;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .empty-state h2 {
+            font-size: 22px;
+            margin-bottom: 12px;
+        }
+
+        .empty-state code {
+            background: #f0e9dc;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        .empty-state pre {
+            background: #f0e9dc;
+            padding: 12px;
+            border-radius: 4px;
+            display: inline-block;
+            text-align: left;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .charts { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div id="site-nav-root"></div>
+    <script src="/nav.js"></script>
+
+    <h1>Training Benchmarks</h1>
+    <p class="subtitle">
+        Training throughput under different algorithm and thread-count
+        configurations.
+    </p>
+
+    <div id="empty-state" class="empty-state" style="display:none">
+        <h2>No benchmarks data found</h2>
+        <p>Expected <code>/benchmarks.json</code> at the site root.</p>
+        <p style="margin-top:10px">Generate a fresh matrix and publish it:</p>
+        <pre>./scripts/bench-matrix.sh
+cp training/bench-results/&lt;latest&gt;/benchmarks.json \
+   frontend/dist/benchmarks.json</pre>
+    </div>
+
+    <div id="content" style="display:none">
+        <div id="meta-bar" class="meta-bar"></div>
+
+        <div class="charts">
+            <div class="chart-container">
+                <button class="fullscreen-btn" onclick="toggleFullscreen(this.parentElement)">Expand</button>
+                <h2>Games/sec scaling</h2>
+                <canvas id="games-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <button class="fullscreen-btn" onclick="toggleFullscreen(this.parentElement)">Expand</button>
+                <h2>Moves/sec scaling</h2>
+                <canvas id="moves-chart"></canvas>
+            </div>
+        </div>
+
+        <div class="charts">
+            <div class="chart-container">
+                <button class="fullscreen-btn" onclick="toggleFullscreen(this.parentElement)">Expand</button>
+                <h2>Avg score per game (convergence parity)</h2>
+                <canvas id="score-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <button class="fullscreen-btn" onclick="toggleFullscreen(this.parentElement)">Expand</button>
+                <h2>Speedup vs serial baseline</h2>
+                <canvas id="speedup-chart"></canvas>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <h2>All runs</h2>
+            <table id="runs-table">
+                <thead>
+                    <tr>
+                        <th>Label</th>
+                        <th>Algorithm</th>
+                        <th class="numeric">Threads</th>
+                        <th>Patterns</th>
+                        <th class="numeric">Games</th>
+                        <th class="numeric">Games/sec</th>
+                        <th class="numeric">Moves/sec</th>
+                        <th class="numeric">Avg score</th>
+                        <th class="numeric">Wall (s)</th>
+                        <th class="numeric">Peak RSS (MB)</th>
+                    </tr>
+                </thead>
+                <tbody id="runs-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const ALGO_COLORS = {
+            serial: '#6c7a89',
+            hogwild: '#c46d3a',
+        };
+
+        const activeCharts = [];
+
+        function toggleFullscreen(element) {
+            if (!document.fullscreenElement) {
+                element.requestFullscreen?.();
+            } else {
+                document.exitFullscreen?.();
+            }
+        }
+
+        document.addEventListener('fullscreenchange', () => {
+            setTimeout(() => { activeCharts.forEach(c => c.resize()); }, 100);
+        });
+
+        async function load() {
+            let data;
+            try {
+                const response = await fetch('/benchmarks.json', { cache: 'no-store' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                data = await response.json();
+            } catch (error) {
+                console.warn('No benchmarks.json:', error);
+                document.getElementById('empty-state').style.display = 'block';
+                return;
+            }
+
+            if (!data.runs || data.runs.length === 0) {
+                document.getElementById('empty-state').style.display = 'block';
+                return;
+            }
+
+            document.getElementById('content').style.display = 'block';
+            renderMeta(data);
+            renderTable(data.runs);
+            renderScalingCharts(data.runs);
+            renderScoreChart(data.runs);
+            renderSpeedupChart(data.runs);
+        }
+
+        function renderMeta(data) {
+            const runs = data.runs;
+            const generated = data.generated_at || 'unknown';
+            const patterns = [...new Set(runs.map(r => r.patterns))].join(', ');
+            const games = [...new Set(runs.map(r => r.games))].join(', ');
+            const seeds = [...new Set(runs.map(r => r.seed))].join(', ');
+            document.getElementById('meta-bar').innerHTML = `
+                <div class="item"><span class="label">Generated:</span><span class="value">${generated}</span></div>
+                <div class="item"><span class="label">Patterns:</span><span class="value">${patterns}</span></div>
+                <div class="item"><span class="label">Games/run:</span><span class="value">${games}</span></div>
+                <div class="item"><span class="label">Seed:</span><span class="value">${seeds}</span></div>
+                <div class="item"><span class="label">Runs:</span><span class="value">${runs.length}</span></div>
+            `;
+        }
+
+        function sortedRuns(runs) {
+            // serial first, then hogwild by thread count ascending.
+            return [...runs].sort((a, b) => {
+                if (a.algorithm !== b.algorithm) {
+                    return a.algorithm === 'serial' ? -1 : 1;
+                }
+                return a.num_threads - b.num_threads;
+            });
+        }
+
+        function renderTable(runs) {
+            const tbody = document.getElementById('runs-tbody');
+            tbody.innerHTML = sortedRuns(runs).map(r => `
+                <tr>
+                    <td>${r.label || '—'}</td>
+                    <td><span class="algo-${r.algorithm}">${r.algorithm}</span></td>
+                    <td class="numeric">${r.num_threads}</td>
+                    <td>${r.patterns}</td>
+                    <td class="numeric">${r.games.toLocaleString()}</td>
+                    <td class="numeric">${Math.round(r.games_per_second).toLocaleString()}</td>
+                    <td class="numeric">${Math.round(r.moves_per_second).toLocaleString()}</td>
+                    <td class="numeric">${Math.round(r.avg_score_per_game).toLocaleString()}</td>
+                    <td class="numeric">${r.wall_clock_seconds.toFixed(2)}</td>
+                    <td class="numeric">${r.peak_rss_kb ? Math.round(r.peak_rss_kb / 1024) : '—'}</td>
+                </tr>
+            `).join('');
+        }
+
+        function groupByAlgorithm(runs) {
+            const groups = {};
+            for (const run of runs) {
+                if (!groups[run.algorithm]) groups[run.algorithm] = [];
+                groups[run.algorithm].push(run);
+            }
+            for (const algo in groups) {
+                groups[algo].sort((a, b) => a.num_threads - b.num_threads);
+            }
+            return groups;
+        }
+
+        function renderScalingCharts(runs) {
+            const groups = groupByAlgorithm(runs);
+            const maxThreads = Math.max(...runs.map(r => r.num_threads));
+            renderScalingChart('games-chart', groups, 'games_per_second', 'Games/sec', maxThreads);
+            renderScalingChart('moves-chart', groups, 'moves_per_second', 'Moves/sec', maxThreads);
+        }
+
+        function renderScalingChart(canvasId, groups, field, yLabel, maxThreads) {
+            const datasets = [];
+
+            // Hogwild and any other multi-threaded algorithms: scaling curve
+            // with one point per thread count. Rendered first so they sit
+            // underneath the serial baseline.
+            for (const algo of Object.keys(groups)) {
+                if (algo === 'serial') continue;
+                datasets.push({
+                    label: algo,
+                    data: groups[algo].map(r => ({ x: r.num_threads, y: r[field] })),
+                    borderColor: ALGO_COLORS[algo] || '#8f7a66',
+                    backgroundColor: (ALGO_COLORS[algo] || '#8f7a66') + '22',
+                    tension: 0.2,
+                    pointRadius: 5,
+                    borderWidth: 2,
+                });
+            }
+
+            // Serial: horizontal dashed reference line spanning the x-axis.
+            // A single-point dataset would be occluded by hogwild-1; a
+            // reference line also makes it obvious where hogwild crosses
+            // the baseline.
+            if (groups.serial && groups.serial.length > 0) {
+                const baseline = groups.serial[0][field];
+                datasets.push({
+                    label: 'serial (baseline)',
+                    data: [
+                        { x: 0, y: baseline },
+                        { x: maxThreads, y: baseline },
+                    ],
+                    borderColor: ALGO_COLORS.serial,
+                    backgroundColor: 'transparent',
+                    borderDash: [6, 4],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    fill: false,
+                });
+            }
+
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'Threads' },
+                            beginAtZero: true,
+                        },
+                        y: {
+                            title: { display: true, text: yLabel },
+                            beginAtZero: true,
+                        },
+                    },
+                },
+            });
+            activeCharts.push(chart);
+        }
+
+        function renderScoreChart(runs) {
+            // Scatter: avg score per run. Flat line means convergence parity.
+            const sorted = sortedRuns(runs);
+            const datasets = [{
+                label: 'Avg score per game',
+                data: sorted.map((r, i) => ({ x: i, y: r.avg_score_per_game, label: r.label })),
+                backgroundColor: sorted.map(r => ALGO_COLORS[r.algorithm] || '#8f7a66'),
+                pointRadius: 6,
+            }];
+
+            const ctx = document.getElementById('score-chart').getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'scatter',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Run (serial → hogwild by threads)' },
+                            ticks: {
+                                callback: (value) => sorted[value]?.label || '',
+                                stepSize: 1,
+                            },
+                        },
+                        y: {
+                            title: { display: true, text: 'Avg score' },
+                            beginAtZero: true,
+                        },
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const run = sorted[ctx.parsed.x];
+                                    return `${run.label}: ${Math.round(ctx.parsed.y).toLocaleString()}`;
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+            activeCharts.push(chart);
+        }
+
+        function renderSpeedupChart(runs) {
+            const serial = runs.find(r => r.algorithm === 'serial' && r.num_threads === 1);
+            if (!serial) {
+                // No baseline — render empty chart with message
+                const ctx = document.getElementById('speedup-chart').getContext('2d');
+                const chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels: ['(no serial-1 baseline in this matrix)'], datasets: [] },
+                    options: { responsive: true },
+                });
+                activeCharts.push(chart);
+                return;
+            }
+
+            const sorted = sortedRuns(runs);
+            const labels = sorted.map(r => r.label);
+            const speedups = sorted.map(r => r.games_per_second / serial.games_per_second);
+            const backgroundColors = sorted.map(r => ALGO_COLORS[r.algorithm] || '#8f7a66');
+
+            const ctx = document.getElementById('speedup-chart').getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Speedup vs serial-1',
+                        data: speedups,
+                        backgroundColor: backgroundColors,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: 'Run' } },
+                        y: {
+                            title: { display: true, text: 'Speedup (×)' },
+                            beginAtZero: true,
+                        },
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.parsed.y.toFixed(2)}×`,
+                            },
+                        },
+                    },
+                },
+            });
+            activeCharts.push(chart);
+        }
+
+        load();
+    </script>
+</body>
+</html>

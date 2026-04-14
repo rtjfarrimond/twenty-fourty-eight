@@ -88,11 +88,30 @@ fn main() {
             let log_path = training_dir.join(format!("{stem}.log.jsonl"));
             let training_curve = load_training_curve(&log_path);
 
-            println!("Evaluating {name} ({eval_games} games)...");
-            let network = NTupleNetwork::load(bin_path.to_str().unwrap())
-                .unwrap_or_else(|err| panic!("Failed to load {}: {err}", bin_path.display()));
-
-            let final_eval = eval::evaluate(&network, &tables, eval_games, 0);
+            // Prefer the last training-log checkpoint over a fresh eval —
+            // fresh eval uses a non-deterministic RNG, so re-running this
+            // binary produced different numbers than the live training
+            // dashboard showed at training-end time. Using the logged
+            // checkpoint keeps the results table and live view consistent.
+            let final_eval = match training_curve.as_ref().and_then(|c| c.last().cloned()) {
+                Some(last) => {
+                    println!(
+                        "Using logged final eval for {name} ({} games trained).",
+                        last.games_trained
+                    );
+                    last
+                }
+                None => {
+                    println!(
+                        "No training log for {name}; running fresh eval ({eval_games} games)..."
+                    );
+                    let network = NTupleNetwork::load(bin_path.to_str().unwrap())
+                        .unwrap_or_else(|err| {
+                            panic!("Failed to load {}: {err}", bin_path.display())
+                        });
+                    eval::evaluate(&network, &tables, eval_games, 0)
+                }
+            };
             println!(
                 "  {name}: avg {:.0}, max {}",
                 final_eval.avg_score, final_eval.max_score

@@ -28,6 +28,8 @@ if run from the repo root with a workspace).
 
 ## Running
 
+### Single run
+
 ```
 ./target/release/benchmark \
   --algorithm serial --threads 1 \
@@ -38,6 +40,24 @@ if run from the repo root with a workspace).
 
 All flags have defaults — a bare `./benchmark` runs a 10k-game serial
 benchmark on the 4x6 pattern set.
+
+### Matrix runs
+
+Use `scripts/bench-matrix.sh` to run a set of configurations and collect
+JSON results into a dated directory with a formatted summary table at the
+end. This is the primary tool for A/B work and scaling curves.
+
+```
+./scripts/bench-matrix.sh                # default matrix (10k games, 4x6)
+GAMES=20000 ./scripts/bench-matrix.sh    # override games count
+THREAD_COUNTS="1 4 8" ./scripts/bench-matrix.sh   # limit the sweep
+OUTDIR=/tmp/my-run ./scripts/bench-matrix.sh       # pin the output dir
+```
+
+Environment overrides: `GAMES`, `WARMUP`, `PATTERNS`, `SEED`,
+`THREAD_COUNTS`, `OUTDIR`, `SKIP_BUILD=1`. Results land in
+`training/bench-results/<timestamp>/` by default. Each row of the matrix
+emits one JSON; the summary table is printed at the end (requires `jq`).
 
 ## CLI flags
 

@@ -56,3 +56,49 @@ on both.
 - SIMD/PEXT-based feature indexing inside the hot move loop (orthogonal to
   parallelism, multiplies whatever single-thread perf we have).
 - NUMA-aware thread pinning if we ever scale past one socket.
+
+### Memory-layout optimization for training bandwidth ceiling
+Hogwild on our current machine tops out at 2.77× on 15 threads — not
+because of contention but because the weight table (268 MB for 4x6, 537 MB
+for 8x6) vastly exceeds L3 cache (16 MiB), so every feature lookup is a
+DRAM access. `perf stat` measured IPC collapsing from 1.24 (serial) to
+0.33 (hogwild-15) — textbook memory-stall signature. See
+`DESIGN_DECISIONS.md` §12 for full profiling results.
+
+The realistic ceiling on *any* thread count is memory bandwidth. To push
+past 2.77× we need to reduce bytes-per-move, not add cores. Ranked options:
+
+1. **f16 weights.** Halves memory traffic on the read and write paths.
+   Precision tradeoff: TD updates are small (~α·δ ≈ 1e-3 scale) so f16
+   precision loss could accumulate. Needs empirical convergence
+   comparison vs. f32. Expected gain: up to 2× if precision holds.
+2. **Packed/cache-aligned layout.** Current layout: one large 16^6 table
+   per base pattern, accessed at scattered PEXT-derived indices. Each
+   lookup touches one 64-byte cache line and uses only 4 bytes of it —
+   94% waste. Options:
+   - Interleave small groups of adjacent indices across patterns so one
+     cache line serves multiple lookups.
+   - Pre-gather weights for hot index ranges into a separate small table
+     that fits in L2.
+   - Both ideas need access-pattern profiling first — 2048 play doesn't
+     visit all 16.7M indices uniformly, so there may be exploitable
+     skew.
+3. **Fewer lookups per move.** E.g. early-exit on clearly-dominated
+   afterstates, or reuse the value of unchanged boards across repeated
+   evaluations. Algorithmic, harder to do correctly, probably smaller
+   gain than #1 and #2.
+4. **Prefetching.** PEXT-derived indices make software prefetch hard
+   because each feature's next access depends on the current board's
+   bits. Hardware prefetcher already does what it can.
+
+**Why this is deferred:** it's deep work — each option needs a careful
+convergence A/B to confirm it doesn't wreck learning, plus its own
+throughput benchmark. Estimate: half a week of focused effort, not a
+side-task. The 2.77× win from Hogwild alone is already useful for
+near-term experiment iteration.
+
+**How to apply:** when revisiting, use the benchmark harness to establish
+the baseline (current numbers live in `DESIGN_DECISIONS.md` §12), try
+one optimization at a time, run A/B with convergence parity check
+(same-seed training to N games, compare avg score). Don't stack changes
+without isolating each one's contribution.

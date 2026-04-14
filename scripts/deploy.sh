@@ -43,9 +43,12 @@ sudo cp "$PROJECT_ROOT/training/target/release/training" /opt/2048-solver/bin/
 sudo cp "$PROJECT_ROOT/training/target/release/generate_models" /opt/2048-solver/bin/
 sudo cp "$PROJECT_ROOT/training/target/release/benchmark" /opt/2048-solver/bin/
 
-# Install frontend
+# Install frontend (exclude benchmarks.json — it is generated fresh below
+# and published to /opt directly; excluding it here keeps the existing
+# live copy in place if benchmarks are skipped or fail)
 echo "--- Installing frontend ---"
-sudo rsync -a --delete "$PROJECT_ROOT/frontend/dist/" /opt/2048-solver/frontend/
+sudo rsync -a --delete --exclude='benchmarks.json' \
+    "$PROJECT_ROOT/frontend/dist/" /opt/2048-solver/frontend/
 
 # Install config (don't overwrite existing — user may have customised)
 if [ ! -f /etc/2048-solver/config.toml ]; then
@@ -88,6 +91,27 @@ done
 echo "--- Generating models.json ---"
 cd /var/lib/2048-solver/models
 /opt/2048-solver/bin/generate_models
+cd "$PROJECT_ROOT"
+
+# Run the benchmark matrix and publish its output to the live server.
+# Override via SKIP_BENCHMARKS=1 (e.g. to deploy while training is hogging
+# CPU, or to skip a lengthy matrix for a quick config-only deploy).
+if [ "${SKIP_BENCHMARKS:-0}" = "1" ]; then
+    echo "--- Skipping benchmarks (SKIP_BENCHMARKS=1) ---"
+else
+    echo "--- Running benchmark matrix ---"
+    BENCH_OUTDIR="$PROJECT_ROOT/training/bench-results/deploy-$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+    OUTDIR="$BENCH_OUTDIR" SKIP_BUILD=1 "$PROJECT_ROOT/scripts/bench-matrix.sh"
+
+    if [ -f "$BENCH_OUTDIR/benchmarks.json" ]; then
+        echo "--- Publishing benchmarks.json ---"
+        sudo cp "$BENCH_OUTDIR/benchmarks.json" \
+            /opt/2048-solver/frontend/benchmarks.json
+    else
+        echo "  WARNING: bench-matrix did not produce benchmarks.json; "\
+"live dashboard data left unchanged"
+    fi
+fi
 
 # Install systemd service
 echo "--- Installing systemd service ---"

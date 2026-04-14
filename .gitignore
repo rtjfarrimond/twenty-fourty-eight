@@ -8,3 +8,5 @@ flamegraph.svg
 **/training_config.json
 **/*.bin
 **/models.json
+**/bench-results/
+**/benchmarks.json
