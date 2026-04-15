@@ -19,6 +19,9 @@ pub struct ServerConfig {
 
     #[serde(default = "default_training_dir")]
     pub training_dir: PathBuf,
+
+    #[serde(default = "default_queue_dir")]
+    pub queue_dir: PathBuf,
 }
 
 fn default_port() -> u16 {
@@ -35,6 +38,9 @@ fn default_models_dir() -> PathBuf {
 }
 fn default_training_dir() -> PathBuf {
     PathBuf::from("../training")
+}
+fn default_queue_dir() -> PathBuf {
+    PathBuf::from("/var/lib/2048-solver/queue")
 }
 
 impl ServerConfig {

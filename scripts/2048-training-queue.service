@@ -1,0 +1,22 @@
+[Unit]
+Description=2048 RL Training Queue Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=2048-solver
+Group=2048-solver
+ExecStart=/opt/2048-solver/bin/training daemon
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+
+# A daemon restart while a job is running will leave that job's file in
+# running/ — on next start the daemon's orphan-recovery sweep moves it
+# to failed/. Allow the in-flight subprocess up to 30s to wind down on
+# stop; SIGKILL after that.
+TimeoutStopSec=30
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

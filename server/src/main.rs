@@ -3,6 +3,7 @@ mod config;
 mod model_registry;
 mod model_watcher;
 mod protocol;
+mod queue_stream;
 mod session;
 mod training_stream;
 mod websocket;
@@ -33,6 +34,7 @@ async fn main() {
     println!("  Frontend: {}", config.frontend_dir.display());
     println!("  Models: {}", config.models_dir.display());
     println!("  Training: {}", config.training_dir.display());
+    println!("  Queue: {}", config.queue_dir.display());
     println!("  Move interval: {}ms", config.move_interval_ms);
     println!();
 
@@ -85,13 +87,23 @@ async fn main() {
 
     let training_dir = config.training_dir.clone();
     let training_dir_sse = config.training_dir.clone();
+    let queue_dir_sse = config.queue_dir.clone();
     let frontend_dir = config.frontend_dir.clone();
+    let models_json_path = config.models_dir.join("models.json");
 
     let app = Router::new()
         .route("/ws", get(websocket_handler))
         .route(
             "/training/stream",
             get(move || training_stream::training_stream(training_dir_sse.clone())),
+        )
+        .route(
+            "/queue/stream",
+            get(move || queue_stream::queue_stream(queue_dir_sse.clone())),
+        )
+        .route(
+            "/models.json",
+            get(move || serve_file(models_json_path.clone(), "application/json")),
         )
         .route(
             "/training_log.jsonl",
@@ -198,6 +210,20 @@ async fn serve_latest(
 
 fn not_found() -> axum::response::Response {
     (axum::http::StatusCode::NOT_FOUND, "Not found").into_response()
+}
+
+/// Read a file and serve it with the given content type. Used for runtime
+/// data (models.json) that lives in /var/lib/ rather than alongside the
+/// static frontend assets.
+async fn serve_file(path: std::path::PathBuf, content_type: &str) -> axum::response::Response {
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => (
+            [(axum::http::header::CONTENT_TYPE, content_type.to_string())],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => not_found(),
+    }
 }
 
 async fn find_latest(directory: &Path, suffix: &str) -> Option<String> {

@@ -423,6 +423,103 @@ can run; it deserves the same design rigor as model architecture.
 
 ---
 
+## 18. Optimistic Weight Initialization
+
+**Decision:** Use optimistic init for n-tuple TD with a small K — empirically
+~0.25× the converged-per-pattern weight magnitude. The classical "K must
+exceed E[return]" rule for tabular bandits does not transfer to n-tuple TD;
+K should sit just above the *early* per-weight magnitude, not the converged
+one.
+
+**Empirical K-curve (4x6, 100K games, hogwild 14 threads, lr=0.0025):**
+
+| K       | V_init    | Avg score | 2048%  | Notes               |
+|---------|-----------|-----------|--------|---------------------|
+| 0       | 0         | 12,725    | 4.0    | zero-init baseline  |
+| 20      | 640       | 16,054    | 16.8   |                     |
+| 50      | 1.6k      | 16,311    | 18.6   |                     |
+| 100     | 3.2k      | 16,594    | 19.8   | **peak**            |
+| 250     | 8k        | 15,921    | 16.3   |                     |
+| 500     | 16k       | 15,300    | 13.9   |                     |
+| 1000    | 32k       | 15,149    | 11.9   |                     |
+| 2000    | 64k       | 14,653    | 10.5   |                     |
+| 5000    | 160k      | 14,191    | 9.8    | shallow tail        |
+| 380,000 | 12M       | 7,613     | 0.0    | catastrophic        |
+
+K=100 wins by ~+30% on avg score and ~5× on 2048-rate vs zero init at the
+same game count. Sample efficiency: **K=100 at 10K games matches zero-init
+at 30K games** — ~3× early speedup.
+
+**Curve shape is asymmetric:** steep ramp from K=0 (single biggest jump on
+the curve is K=0→K=20: +26%), then a broad plateau K=20–250 within ~5% of
+peak, then a gentle decline an order of magnitude past peak, then a cliff
+somewhere between K=5000 and K=380000. The asymmetry matters for tuning:
+overshooting K modestly is mostly free, undershooting near zero is not.
+
+**Tuning rule:** for an n-tuple network with `P` total patterns (base × 8
+symmetries) trained to expected converged avg score `S`:
+
+```
+K_optimal ≈ (S / P) × 0.25
+```
+
+(Calibrated from 4x6/100K: S=12.7k, P=32 → S/P=397 → K=100 = 0.25 × 397.)
+
+**Why a small K — and not a big one as bandit literature suggests:**
+- In tabular bandits, each arm has its own Q; K must exceed E[return] so
+  unpulled arms stay attractive after one pull updates a competing Q
+  downward.
+- In n-tuple TD, V(board) = sum of `P` weight lookups. Even a small K sets
+  every unvisited weight slightly above zero, which shifts unvisited
+  *features* (not states) upward. Since most features are touched many
+  times, the early per-weight magnitude is small — `O(lr × δ)` per touch,
+  which is on the order of single digits in early games. K just needs to
+  exceed *that* (a few units), not the eventual converged magnitude
+  (hundreds to thousands).
+- Going far above this baseline doesn't increase exploration further; it
+  just slows the weights' descent toward truth.
+
+**Worked examples (using S/P × 0.25):**
+
+| Setup           | P  | Expected S | K_optimal |
+|-----------------|----|------------|-----------|
+| 4x6 / 100K      | 32 | ~13k       | ~100      |
+| 4x6 / 1M        | 32 | ~36k       | ~280      |
+| 4x6 / 10M       | 32 | ~110k      | ~860      |
+| 8x6 / 100K      | 64 | ~14k       | ~55       |
+| 8x6 / 1M        | 64 | ~41k       | ~160      |
+| 8x6 / 10M       | 64 | ~125k      | ~490      |
+
+Note: the K-curve is a broad plateau spanning roughly 0.2× to 2.5× of
+K_optimal (within ~5% of peak), so the rule doesn't need to be precise.
+Going an order of magnitude high costs ~10–15%; two orders catastrophic.
+Going to K=0 costs ~30%.
+
+**Failure mode (previously documented):** picking K orders of magnitude
+above truth (we tried K=380,000 for 4x6 in early experiments) is not "more
+optimism" — it cripples learning. With per-update step ≈ `lr × δ` where δ
+scales with game returns (thousands), the time to drag weights from K down
+toward truth scales as `K / (lr × S)` per weight; with K=380k, lr=0.0025,
+S=110k it takes ~1400 updates per weight. Spread over 67M weight slots
+touched ~once per 1000 games, that's many millions of games before weights
+reach the right magnitude — even 10M games never recovers, and the run
+underperforms zero-init by 5-10×.
+
+**Why it works on n-tuple TD when random init does not:** optimistic init
+shifts the *mean* of V (drives exploration of unvisited states); random
+init shifts only the *variance* around zero (no exploration pressure,
+nothing to break since each weight is already a unique
+`(pattern, board_index)` lookup).
+
+**How to apply:** pick K from the tuning rule above based on (a) total
+pattern count and (b) the expected converged score for your target game
+budget. If unsure, the K-curve is a plateau — anything within 0.5× to 5×
+of the optimum is fine, and only orders-of-magnitude misses are
+catastrophic. When training to a longer horizon than tested, scale K
+upward proportionally to the expected converged score.
+
+---
+
 **Remaining polish items:**
 - Tile sliding animations (requires client-side state diffing)
 - Replace unicode arrow characters with SVG/icon font for consistent

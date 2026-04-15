@@ -30,19 +30,14 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-    // Output path: second arg, or models_dir/../frontend/models.json,
-    // or fall back to /opt/2048-solver/frontend/models.json
+    // Output path: second arg, or models_dir/models.json. Co-locating with
+    // the .bin files keeps everything under /var/lib/2048-solver/ which the
+    // 2048-solver service user owns; the server has a /models.json route
+    // that reads from this location.
     let output_path = std::env::args()
         .nth(2)
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let default_fhs = PathBuf::from("/opt/2048-solver/frontend/models.json");
-            if default_fhs.parent().unwrap().exists() {
-                default_fhs
-            } else {
-                models_dir.join("../frontend/dist/models.json")
-            }
-        });
+        .unwrap_or_else(|| models_dir.join("models.json"));
 
     // Training logs dir: third arg, or /var/lib/2048-solver/training,
     // or fall back to models_dir (for dev)

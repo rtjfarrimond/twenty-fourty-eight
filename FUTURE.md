@@ -1,16 +1,56 @@
 # Future Ideas
 
-### Proper user/group for services and data
-Currently `/var/lib/2048-solver/` is root-owned and the server runs as root.
-Rob has been chowned the data dirs as a workaround to avoid sudo for training.
-Proper fix: create a `2048-solver` system user + group, run the server as
-that user, add rob to the group, chmod g+w the data dirs. Update the systemd
-unit and deploy script accordingly.
+### Experiments without deploy or persistence
+Every K-sweep, ablation, or quick probe currently produces a permanent
+model file: ~257MB for 4x6 or ~513MB for 8x6, auto-loaded into server RAM
+and given a continuous game loop. After ~20 experiments the server is at
+~7GB RSS holding mostly dead-weight models we only ever needed for a
+single results-table data point. The data we actually want (final eval +
+training curve) is a few KB; the .bin payload is irrelevant once captured.
 
-### Training job queue
-Persistent queue of training runs that survives reboots, lets you inspect
-what's pending, reorder, and kill jobs. Today we chain with `&&`, which is
-fine for sequential overnight runs but can't be introspected or edited.
+Concrete options, pick or combine:
+1. **Two-tier storage.** Submitter chooses `models/` (auto-loaded, played
+   live) vs `experiments/` (catalogued, indexed in models.json, but never
+   loaded by the server). Promotion is `mv` between dirs.
+2. **No-persist mode.** `--ephemeral` flag on `training submit` writes
+   only the eval log + config to a `runs/` dir; no .bin saved.
+   Dashboard shows the curve, server never sees the model. Best for
+   K-sweeps and ablations where the model artefact has zero downstream
+   use.
+3. **LRU eviction in server.** Server loads on demand (first user request
+   for that model) and evicts after N minutes idle. Cheaper RAM, slower
+   first-request latency. Orthogonal to (1) and (2).
+
+Minimum viable: (2) — most of our recent experimentation produces no
+artefact worth keeping. The K-sweep would have generated 8 ephemeral runs
+and we'd have the same data with zero ongoing cost.
+
+### Cancel running training job
+The queue daemon can cancel pending jobs but not in-flight ones. Add
+SIGTERM-the-child + cleanup-partial-artefacts (.log.jsonl, .bin in
+progress) to make `training queue cancel <id>` work for any state.
+
+### Quantify benchmark variance on the dashboard
+The benchmarks dashboard currently shows a single run per config, regenerated
+on every deploy. Numbers visibly drift between deploys because they include
+run-to-run noise from: TD RNG, memory-bandwidth contention from other
+processes at deploy time, scheduler decisions, and thermal state. A reader
+can't tell whether "hogwild-15: 2.77× today, 3.1× tomorrow" reflects a real
+trend or just stochastic variance.
+
+Options, pick one or combine:
+1. **Multiple runs per config, show mean ± stddev.** Extend bench-matrix
+   to run each (algorithm, threads) N times, emit stats aggregated across
+   runs. Dashboard plots means with error bars. Most rigorous; ~N× deploy
+   time cost.
+2. **Bigger games count so variance is negligible.** Law-of-large-numbers
+   approach. Bump default `GAMES` in bench-matrix from 10k to 50-100k.
+   Cheap, but doesn't eliminate memory-bandwidth contention variance.
+3. **Caveat on the page.** Add a one-liner noting single-run data and
+   expected ~10% variance. Minimum-effort band-aid if the real fix is
+   deferred.
+
+Minimum viable: (3) + (2). Ideal: (1) with N=3 runs per config.
 
 ### Parallel training (Hogwild-style)
 Training currently uses a single core — we observed one core pegged at 100%

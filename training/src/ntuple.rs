@@ -81,6 +81,60 @@ impl NTupleNetwork {
         base_patterns: &[Vec<(usize, usize)>],
         initial_weight: f32,
     ) -> Self {
+        let (masks, table_size, total_weights) = Self::build_layout(base_patterns);
+        let initial_bits = initial_weight.to_bits();
+        let weights = (0..total_weights)
+            .map(|_| AtomicU32::new(initial_bits))
+            .collect();
+
+        Self {
+            masks,
+            weights,
+            table_size,
+        }
+    }
+
+    /// Constructs a network whose weights are independently sampled uniformly
+    /// from `[-amplitude, +amplitude]`. Deterministic given `seed`.
+    ///
+    /// Random init breaks symmetry between weights but does not bias the
+    /// agent toward exploration the way optimistic init does — values start
+    /// near zero, not near the natural game-score scale. Useful for ensembling
+    /// experiments and seed-variance studies.
+    pub fn with_random_init(
+        base_patterns: &[Vec<(usize, usize)>],
+        amplitude: f32,
+        seed: u64,
+    ) -> Self {
+        use rand::Rng;
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let (masks, table_size, total_weights) = Self::build_layout(base_patterns);
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let weights = (0..total_weights)
+            .map(|_| {
+                let value: f32 = if amplitude > 0.0 {
+                    rng.random_range(-amplitude..=amplitude)
+                } else {
+                    0.0
+                };
+                AtomicU32::new(value.to_bits())
+            })
+            .collect();
+
+        Self {
+            masks,
+            weights,
+            table_size,
+        }
+    }
+
+    /// Computes per-pattern PEXT masks, the per-table size, and the total
+    /// weight count. Shared by every constructor so they agree on layout.
+    fn build_layout(
+        base_patterns: &[Vec<(usize, usize)>],
+    ) -> (Vec<u64>, usize, usize) {
         assert!(
             base_patterns.iter().all(|p| p.len() == 6),
             "Only 6-tuple patterns are supported"
@@ -93,18 +147,8 @@ impl NTupleNetwork {
                 build_pext_mask(&flat)
             })
             .collect();
-
         let total_weights = base_patterns.len() * table_size;
-        let initial_bits = initial_weight.to_bits();
-        let weights = (0..total_weights)
-            .map(|_| AtomicU32::new(initial_bits))
-            .collect();
-
-        Self {
-            masks,
-            weights,
-            table_size,
-        }
+        (masks, table_size, total_weights)
     }
 
     /// Fast bitwise flip (reverse rows): swap rows 0<->3, 1<->2.
@@ -341,6 +385,44 @@ mod tests {
 
         network.update(&board_a, 80.0);
         assert!(network.evaluate(&board_a) > 0.0);
+        assert_ne!(network.evaluate(&board_a), network.evaluate(&board_b));
+    }
+
+    #[test]
+    fn random_init_is_deterministic_given_seed() {
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
+        let net1 = NTupleNetwork::with_random_init(&base_patterns, 0.01, 42);
+        let net2 = NTupleNetwork::with_random_init(&base_patterns, 0.01, 42);
+        let board = Board::new();
+        assert_eq!(net1.evaluate(&board), net2.evaluate(&board));
+    }
+
+    #[test]
+    fn random_init_differs_across_seeds() {
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
+        let net1 = NTupleNetwork::with_random_init(&base_patterns, 0.01, 42);
+        let net2 = NTupleNetwork::with_random_init(&base_patterns, 0.01, 43);
+        let board = Board::new();
+        assert_ne!(net1.evaluate(&board), net2.evaluate(&board));
+    }
+
+    #[test]
+    fn random_init_zero_amplitude_equals_zero_init() {
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
+        let network = NTupleNetwork::with_random_init(&base_patterns, 0.0, 42);
+        let mut board = Board::new();
+        board.set_tile(2, 3, 7);
+        assert_eq!(network.evaluate(&board), 0.0);
+    }
+
+    #[test]
+    fn random_init_distinguishes_distinct_boards() {
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
+        let network = NTupleNetwork::with_random_init(&base_patterns, 0.01, 7);
+        let mut board_a = Board::new();
+        board_a.set_tile(0, 0, 1);
+        let mut board_b = Board::new();
+        board_b.set_tile(0, 0, 2);
         assert_ne!(network.evaluate(&board_a), network.evaluate(&board_b));
     }
 

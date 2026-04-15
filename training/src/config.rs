@@ -33,6 +33,19 @@ pub fn select_patterns(preset: &str) -> Vec<Vec<(usize, usize)>> {
     }
 }
 
+/// Rejects a CLI invocation that asks for both optimistic and random
+/// weight initialization. They're orthogonal concepts and combining them
+/// is almost certainly a user error.
+pub fn validate_init_mode(optimistic_init: f32, random_init_amplitude: f32) {
+    if optimistic_init != 0.0 && random_init_amplitude != 0.0 {
+        panic!(
+            "--optimistic-init and --random-init-amplitude are mutually exclusive \
+             (got optimistic={optimistic_init}, random_amp={random_init_amplitude}). \
+             Pick one or leave both at 0."
+        );
+    }
+}
+
 /// Validates the (algorithm, threads) combination at CLI entry.
 /// Panics with a user-facing message on invalid combinations.
 pub fn validate_algorithm(algorithm: &str, threads: u32) {
@@ -124,5 +137,26 @@ mod tests {
     #[should_panic(expected = "Unknown algorithm: mystery")]
     fn unknown_algorithm_rejected() {
         validate_algorithm("mystery", 1);
+    }
+
+    #[test]
+    fn init_mode_both_zero_is_valid() {
+        validate_init_mode(0.0, 0.0);
+    }
+
+    #[test]
+    fn init_mode_optimistic_only_is_valid() {
+        validate_init_mode(100.0, 0.0);
+    }
+
+    #[test]
+    fn init_mode_random_only_is_valid() {
+        validate_init_mode(0.0, 0.01);
+    }
+
+    #[test]
+    #[should_panic(expected = "mutually exclusive")]
+    fn init_mode_both_nonzero_rejected() {
+        validate_init_mode(100.0, 0.01);
     }
 }

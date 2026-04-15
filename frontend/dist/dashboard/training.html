@@ -161,6 +161,91 @@
             font-size: 16px;
             margin-bottom: 10px;
         }
+
+        .queue-panel {
+            background: #fff;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 16px 20px;
+            margin-bottom: 20px;
+        }
+
+        .queue-panel h2 {
+            font-size: 16px;
+            margin: 0 0 8px 0;
+        }
+
+        .queue-empty {
+            font-size: 14px;
+            color: #bbada0;
+            font-style: italic;
+        }
+
+        .queue-summary {
+            font-size: 13px;
+            color: #776e65;
+        }
+
+        .queue-summary .pill {
+            display: inline-block;
+            background: #faf5eb;
+            border-radius: 999px;
+            padding: 2px 10px;
+            margin-right: 6px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .queue-summary .pill.pending { background: #ede2d3; color: #8f7a66; }
+        .queue-summary .pill.running { background: #f9e7c2; color: #b07a2c; }
+        .queue-summary .pill.completed { background: #d8eedd; color: #3d7a52; }
+        .queue-summary .pill.failed { background: #f5d4cd; color: #b04a35; }
+        .queue-summary .pill.cancelled { background: #e8e2dc; color: #776e65; }
+
+        details.queue-section {
+            margin-top: 10px;
+        }
+
+        details.queue-section > summary {
+            cursor: pointer;
+            font-size: 13px;
+            color: #8f7a66;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: bold;
+            user-select: none;
+            padding: 4px 0;
+        }
+
+        details.queue-section > summary:hover {
+            color: #776e65;
+        }
+
+        .queue-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .queue-table th, .queue-table td {
+            text-align: left;
+            padding: 6px 10px;
+            border-bottom: 1px solid #f0e9dc;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .queue-table th {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: #8f7a66;
+            letter-spacing: 0.05em;
+        }
+
+        .queue-table td.id {
+            font-family: 'Menlo', 'Consolas', monospace;
+            color: #9f8b77;
+            font-size: 11px;
+        }
     </style>
 </head>
 <body>
@@ -168,6 +253,11 @@
     <script src="/nav.js"></script>
 
     <h1>Live Training</h1>
+
+    <div id="queue-panel" class="queue-panel">
+        <h2>Job Queue</h2>
+        <div id="queue-body" class="queue-empty">Connecting…</div>
+    </div>
 
     <div class="status-bar">
         <div id="status-text">
@@ -211,6 +301,109 @@
         let tileChart = null;
         let totalGames = null;
         let evalData = [];
+
+        // ---------------- Job queue panel ----------------
+
+        const QUEUE_SECTIONS = [
+            { key: 'pending',   label: 'Pending' },
+            { key: 'running',   label: 'Running' },
+            { key: 'failed',    label: 'Failed' },
+            { key: 'cancelled', label: 'Cancelled' },
+            { key: 'completed', label: 'Completed' },
+        ];
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, (ch) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                '"': '&quot;', "'": '&#39;',
+            })[ch]);
+        }
+
+        function formatTimestamp(unixSecs) {
+            return new Date(unixSecs * 1000).toLocaleString();
+        }
+
+        function renderQueueSummary(snapshot) {
+            const counts = QUEUE_SECTIONS.map((section) => {
+                const count = snapshot[section.key].length;
+                if (count === 0) return null;
+                return `<span class="pill ${section.key}">${section.label}: ${count}</span>`;
+            }).filter(Boolean);
+            return counts.length === 0
+                ? '<div class="queue-empty">No queued jobs.</div>'
+                : `<div class="queue-summary">${counts.join('')}</div>`;
+        }
+
+        function renderJobsTable(jobs) {
+            const rows = jobs.map((job) => `
+                <tr>
+                    <td class="id">${escapeHtml(job.id)}</td>
+                    <td>${escapeHtml(job.args.model_name)}</td>
+                    <td>${job.args.games.toLocaleString()}</td>
+                    <td>${escapeHtml(job.args.algorithm)}/${job.args.threads}t</td>
+                    <td>${escapeHtml(job.args.patterns)}</td>
+                    <td>${escapeHtml(job.submitted_by)}</td>
+                    <td>${escapeHtml(formatTimestamp(job.submitted_at_unix))}</td>
+                </tr>
+            `).join('');
+            return `
+                <table class="queue-table">
+                    <thead>
+                        <tr>
+                            <th>Job ID</th>
+                            <th>Model</th>
+                            <th>Games</th>
+                            <th>Algo</th>
+                            <th>Patterns</th>
+                            <th>By</th>
+                            <th>Submitted</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+
+        function renderQueue(snapshot) {
+            const body = document.getElementById('queue-body');
+            body.className = '';
+
+            // Pending is open by default if non-empty (the actionable list).
+            // Other sections are collapsed.
+            const sections = QUEUE_SECTIONS.map((section) => {
+                const jobs = snapshot[section.key];
+                if (jobs.length === 0) return '';
+                const isOpen = section.key === 'pending' || section.key === 'running';
+                return `
+                    <details class="queue-section" ${isOpen ? 'open' : ''}>
+                        <summary>${section.label} (${jobs.length})</summary>
+                        ${renderJobsTable(jobs)}
+                    </details>
+                `;
+            }).join('');
+
+            body.innerHTML = renderQueueSummary(snapshot) + sections;
+        }
+
+        function connectQueueStream() {
+            const source = new EventSource('/queue/stream');
+            source.addEventListener('snapshot', (event) => {
+                try {
+                    renderQueue(JSON.parse(event.data));
+                } catch (err) {
+                    console.error('Bad queue snapshot payload:', err);
+                }
+            });
+            source.addEventListener('error', () => {
+                const body = document.getElementById('queue-body');
+                body.className = 'queue-empty';
+                body.textContent = 'Queue stream disconnected, retrying…';
+            });
+        }
+
+        connectQueueStream();
+
+        // ---------------- Live training view ----------------
 
         function createOrUpdateScoreChart() {
             const ctx = document.getElementById('score-chart').getContext('2d');

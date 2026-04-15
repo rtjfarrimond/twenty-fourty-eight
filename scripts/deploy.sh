@@ -15,17 +15,40 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVICE_NAME="2048-server"
+QUEUE_SERVICE_NAME="2048-training-queue"
+SERVICE_USER="2048-solver"
 
 echo "=== Deploying 2048 Solver ==="
 echo
 
+# Verify the service user exists. The bootstrap step is one-time and out
+# of band — fail fast with a useful pointer if it hasn't been done.
+if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+    echo "ERROR: system user '$SERVICE_USER' does not exist." >&2
+    echo "Run 'sudo ./scripts/bootstrap-user.sh' first (one-time setup)." >&2
+    exit 1
+fi
+
 # Build everything
 "$PROJECT_ROOT/scripts/build.sh"
 
-# Stop the service if running (can't overwrite a running binary)
+# Stop services if running (can't overwrite a running binary)
 if systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1; then
-    echo "--- Stopping service ---"
+    echo "--- Stopping $SERVICE_NAME ---"
     sudo systemctl stop "$SERVICE_NAME"
+fi
+if systemctl is-active "$QUEUE_SERVICE_NAME" >/dev/null 2>&1; then
+    # Warn if a job is actually mid-execution. The queue daemon's
+    # orphan-recovery sweep will mark it 'failed' on next start.
+    QUEUE_DIR=/var/lib/2048-solver/queue
+    if [ -d "$QUEUE_DIR/running" ] && \
+       [ -n "$(ls -A "$QUEUE_DIR/running" 2>/dev/null)" ]; then
+        echo "  WARNING: a training job is currently running and will be"
+        echo "           marked failed on next daemon start. Re-submit if"
+        echo "           you want to retry."
+    fi
+    echo "--- Stopping $QUEUE_SERVICE_NAME ---"
+    sudo systemctl stop "$QUEUE_SERVICE_NAME"
 fi
 
 # Create directory structure
@@ -35,6 +58,18 @@ sudo mkdir -p /opt/2048-solver/frontend
 sudo mkdir -p /etc/2048-solver
 sudo mkdir -p /var/lib/2048-solver/models
 sudo mkdir -p /var/lib/2048-solver/training
+# Queue subdirs match the JobState enum in training/src/queue.rs
+for state in pending running completed failed cancelled; do
+    sudo mkdir -p "/var/lib/2048-solver/queue/$state"
+done
+
+# Data dirs are owned by the service user so the systemd-managed server
+# and queue daemon can read/write them. Setgid bit on directories means
+# files an admin in the service group creates inherit the group, so the
+# daemon can read jobs submitted via the CLI.
+sudo chown -R "$SERVICE_USER:$SERVICE_USER" /var/lib/2048-solver
+sudo chmod -R g+w /var/lib/2048-solver
+sudo find /var/lib/2048-solver -type d -exec chmod g+s {} \;
 
 # Install binaries
 echo "--- Installing binaries ---"
@@ -42,6 +77,10 @@ sudo cp "$PROJECT_ROOT/server/target/release/server" /opt/2048-solver/bin/
 sudo cp "$PROJECT_ROOT/training/target/release/training" /opt/2048-solver/bin/
 sudo cp "$PROJECT_ROOT/training/target/release/generate_models" /opt/2048-solver/bin/
 sudo cp "$PROJECT_ROOT/training/target/release/benchmark" /opt/2048-solver/bin/
+
+# Expose the training CLI on $PATH for admin use (submit/list/cancel jobs).
+# /usr/local/bin is the FHS-standard location for locally-installed binaries.
+sudo ln -sf /opt/2048-solver/bin/training /usr/local/bin/training
 
 # Install frontend (exclude benchmarks.json — it is generated fresh below
 # and published to /opt directly; excluding it here keeps the existing
@@ -87,7 +126,12 @@ for config_file in "$PROJECT_ROOT"/training/*.config.json; do
     sudo cp -p "$config_file" /var/lib/2048-solver/training/
 done
 
-# Generate models.json from installed models
+# models.json now lives alongside the .bin files in the data dir, served
+# by the /models.json axum route. Clean up any stale copy in the static
+# frontend dir from the old layout.
+sudo rm -f /opt/2048-solver/frontend/models.json
+
+# Generate models.json from installed models (writes to models_dir by default)
 echo "--- Generating models.json ---"
 cd /var/lib/2048-solver/models
 /opt/2048-solver/bin/generate_models
@@ -113,24 +157,31 @@ else
     fi
 fi
 
-# Install systemd service
-echo "--- Installing systemd service ---"
+# Install systemd services
+echo "--- Installing systemd services ---"
 sudo cp "$PROJECT_ROOT/scripts/2048-server.service" /etc/systemd/system/"$SERVICE_NAME".service
+sudo cp "$PROJECT_ROOT/scripts/2048-training-queue.service" \
+    /etc/systemd/system/"$QUEUE_SERVICE_NAME".service
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
+sudo systemctl enable "$QUEUE_SERVICE_NAME"
 
-# Restart the service
-echo "--- Restarting service ---"
-sudo systemctl restart "$SERVICE_NAME"
-sleep 1
-
-if systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1; then
-    echo "  Service is running"
-else
-    echo "  WARNING: Service failed to start"
-    sudo journalctl -u "$SERVICE_NAME" --no-pager -n 20
-    exit 1
-fi
+# Restart services
+restart_and_check() {
+    local unit="$1"
+    echo "--- Restarting $unit ---"
+    sudo systemctl restart "$unit"
+    sleep 1
+    if systemctl is-active "$unit" >/dev/null 2>&1; then
+        echo "  $unit is running"
+    else
+        echo "  WARNING: $unit failed to start"
+        sudo journalctl -u "$unit" --no-pager -n 20
+        exit 1
+    fi
+}
+restart_and_check "$SERVICE_NAME"
+restart_and_check "$QUEUE_SERVICE_NAME"
 
 echo
 echo "=== Deploy complete ==="

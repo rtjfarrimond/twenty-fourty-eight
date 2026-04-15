@@ -1,5 +1,10 @@
 pub mod config;
+pub mod daemon;
 pub mod eval;
 pub mod eval_dummy;
 pub mod ntuple;
+pub mod queue;
+pub mod queue_ops;
+pub mod run_args;
+pub mod runner;
 pub mod training;

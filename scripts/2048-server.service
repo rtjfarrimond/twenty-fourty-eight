@@ -4,6 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
+User=2048-solver
+Group=2048-solver
 ExecStart=/opt/2048-solver/bin/server /etc/2048-solver/config.toml
 Restart=on-failure
 RestartSec=5
