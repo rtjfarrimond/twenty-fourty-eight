@@ -13,7 +13,8 @@ use crate::config::select_patterns;
 use crate::eval;
 use crate::ntuple::NTupleNetwork;
 use crate::run_args::RunArgs;
-use crate::training::{train_hogwild_batch, train_one_game};
+use crate::tc_state::TcState;
+use crate::training::{train_hogwild_batch, train_one_game, train_one_game_tc, train_tc_hogwild_batch};
 
 /// Execute a training run end-to-end: print config banner, train, save
 /// model, optionally deploy. Returns `Ok` on success, `Err` with a message
@@ -110,7 +111,12 @@ fn print_banner(
     println!("  Games: {}", args.games);
     println!("  Eval interval: {}", args.eval_interval);
     println!("  Eval games per checkpoint: {}", args.eval_games);
-    println!("  Learning rate: {}", args.learning_rate);
+    let rate_label = if args.algorithm.starts_with("tc") {
+        "Beta (TC meta-learning rate)"
+    } else {
+        "Learning rate"
+    };
+    println!("  {rate_label}: {}", args.learning_rate);
     println!("  Optimistic init: {}", args.optimistic_init);
     println!(
         "  Random init: amplitude={}, seed={}",
@@ -140,6 +146,8 @@ fn run_training(
     match args.algorithm.as_str() {
         "serial" => run_serial_training(network, tables, args, log_writer),
         "hogwild" => run_hogwild_training(network, tables, args, log_writer),
+        "tc" => run_tc_serial_training(network, tables, args, log_writer),
+        "tc-hogwild" => run_tc_hogwild_training(network, tables, args, log_writer),
         other => panic!("Unreachable: validate_algorithm should reject {other}"),
     }
 }
@@ -172,6 +180,48 @@ fn run_hogwild_training(
         let batch_seed = 0xC0FFEE_u64 ^ (games_completed as u64);
         train_hogwild_batch(
             network,
+            tables,
+            args.learning_rate,
+            args.threads,
+            batch_size,
+            batch_seed,
+        );
+        games_completed += batch_size;
+        log_eval_checkpoint(network, tables, args, games_completed, log_writer);
+    }
+}
+
+fn run_tc_serial_training(
+    network: &NTupleNetwork,
+    tables: &MoveTables,
+    args: &RunArgs,
+    log_writer: &mut BufWriter<File>,
+) {
+    let tc_state = TcState::new(network.num_weights());
+    let mut rng = rand::rng();
+    for game in 1..=args.games {
+        train_one_game_tc(network, &tc_state, tables, args.learning_rate, &mut rng);
+        if game % args.eval_interval == 0 {
+            log_eval_checkpoint(network, tables, args, game, log_writer);
+        }
+    }
+}
+
+fn run_tc_hogwild_training(
+    network: &NTupleNetwork,
+    tables: &MoveTables,
+    args: &RunArgs,
+    log_writer: &mut BufWriter<File>,
+) {
+    let tc_state = TcState::new(network.num_weights());
+    let mut games_completed: u32 = 0;
+    while games_completed < args.games {
+        let remaining = args.games - games_completed;
+        let batch_size = remaining.min(args.eval_interval);
+        let batch_seed = 0xC0FFEE_u64 ^ (games_completed as u64);
+        train_tc_hogwild_batch(
+            network,
+            &tc_state,
             tables,
             args.learning_rate,
             args.threads,

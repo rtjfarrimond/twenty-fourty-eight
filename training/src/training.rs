@@ -5,6 +5,7 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::SmallRng;
 
 use crate::ntuple::NTupleNetwork;
+use crate::tc_state::TcState;
 
 /// Stats returned from a completed training game.
 #[derive(Debug, Clone, Copy)]
@@ -100,6 +101,54 @@ pub fn train_one_game(
     }
 }
 
+/// Plays one complete game using TC learning for weight updates.
+///
+/// Like `train_one_game` but replaces the fixed learning rate with
+/// per-weight adaptive rates from the TC accumulators. `beta` is the
+/// meta-learning rate (typically 1.0). The `tc_state` persists across
+/// games — it is never reset between episodes.
+pub fn train_one_game_tc(
+    network: &NTupleNetwork,
+    tc_state: &TcState,
+    tables: &MoveTables,
+    beta: f32,
+    rng: &mut impl Rng,
+) -> GameResult {
+    let mut board = spawn_random_tile(Board::new(), rng);
+    board = spawn_random_tile(board, rng);
+    let mut total_score: u32 = 0;
+    let mut moves: u32 = 0;
+
+    let Some(mut current) = best_afterstate(&board, network, tables) else {
+        return GameResult { score: 0, moves: 0 };
+    };
+    total_score += current.reward;
+    moves += 1;
+
+    loop {
+        let next_board = spawn_random_tile(current.afterstate, rng);
+
+        let Some(next) = best_afterstate(&next_board, network, tables) else {
+            // Game over — terminal update: V(terminal) = 0
+            network.tc_update(&current.afterstate, tc_state, -current.value, beta);
+            break;
+        };
+
+        // TD(0) error: r' + V(s') - V(s)
+        let td_error = next.reward as f32 + next.value - current.value;
+        network.tc_update(&current.afterstate, tc_state, td_error, beta);
+
+        total_score += next.reward;
+        moves += 1;
+        current = next;
+    }
+
+    GameResult {
+        score: total_score,
+        moves,
+    }
+}
+
 /// Aggregated stats from a Hogwild training batch.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BatchStats {
@@ -167,6 +216,70 @@ fn run_worker(
     let mut stats = BatchStats::default();
     for _ in 0..games {
         let result = train_one_game(network, tables, learning_rate, &mut rng);
+        stats.total_score += result.score as u64;
+        stats.total_moves += result.moves as u64;
+        stats.games_played += 1;
+    }
+    stats
+}
+
+/// TC learning variant of Hogwild batch training.
+///
+/// Same parallel structure as `train_hogwild_batch` but uses TC adaptive
+/// learning rates. The `tc_state` is shared across all worker threads
+/// via `&` (atomic internals, same Hogwild semantics as the network).
+pub fn train_tc_hogwild_batch(
+    network: &NTupleNetwork,
+    tc_state: &TcState,
+    tables: &MoveTables,
+    beta: f32,
+    num_threads: u32,
+    games: u32,
+    base_seed: u64,
+) -> BatchStats {
+    assert!(num_threads >= 1, "num_threads must be >= 1");
+    if games == 0 {
+        return BatchStats::default();
+    }
+
+    let per_worker = games / num_threads;
+    let remainder = games % num_threads;
+
+    thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(num_threads as usize);
+        for worker_id in 0..num_threads {
+            let extra = if worker_id < remainder { 1 } else { 0 };
+            let worker_games = per_worker + extra;
+            let worker_seed = base_seed ^ (worker_id as u64).wrapping_mul(0x9E3779B97F4A7C15);
+            let handle = scope.spawn(move || {
+                run_tc_worker(network, tc_state, tables, beta, worker_games, worker_seed)
+            });
+            handles.push(handle);
+        }
+
+        let mut stats = BatchStats::default();
+        for handle in handles {
+            let worker_stats = handle.join().expect("tc hogwild worker panicked");
+            stats.total_score += worker_stats.total_score;
+            stats.total_moves += worker_stats.total_moves;
+            stats.games_played += worker_stats.games_played;
+        }
+        stats
+    })
+}
+
+fn run_tc_worker(
+    network: &NTupleNetwork,
+    tc_state: &TcState,
+    tables: &MoveTables,
+    beta: f32,
+    games: u32,
+    seed: u64,
+) -> BatchStats {
+    let mut rng = SmallRng::seed_from_u64(seed);
+    let mut stats = BatchStats::default();
+    for _ in 0..games {
+        let result = train_one_game_tc(network, tc_state, tables, beta, &mut rng);
         stats.total_score += result.score as u64;
         stats.total_moves += result.moves as u64;
         stats.games_played += 1;
@@ -419,5 +532,136 @@ mod tests {
 
         let candidate = best_afterstate(&board, &network, &tables);
         assert!(candidate.is_some());
+    }
+
+    // --- TC training tests ---
+
+    #[test]
+    fn tc_train_one_game_returns_nonzero_score_and_moves() {
+        let tables = tables();
+        let network = small_network();
+        let tc_state = TcState::new(network.num_weights());
+        let mut rng = rand::rng();
+
+        let result = train_one_game_tc(&network, &tc_state, &tables, 1.0, &mut rng);
+        assert!(result.score > 0);
+        assert!(result.moves > 0);
+    }
+
+    #[test]
+    fn tc_train_one_game_modifies_weights() {
+        let tables = tables();
+        let network = small_network();
+        let tc_state = TcState::new(network.num_weights());
+        let mut rng = rand::rng();
+
+        let initial_eval = network.evaluate(&Board::new());
+        train_one_game_tc(&network, &tc_state, &tables, 1.0, &mut rng);
+        let after_eval = network.evaluate(&Board::new());
+
+        assert_ne!(initial_eval, after_eval);
+    }
+
+    #[test]
+    fn tc_training_improves_over_many_games() {
+        let tables = tables();
+        let network = four_pattern_network();
+        let tc_state = TcState::new(network.num_weights());
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        let mut early_scores = Vec::new();
+        let mut late_scores = Vec::new();
+
+        for game in 0..2000 {
+            let result = train_one_game_tc(&network, &tc_state, &tables, 1.0, &mut rng);
+            if game < 100 {
+                early_scores.push(result.score);
+            } else if game >= 1900 {
+                late_scores.push(result.score);
+            }
+        }
+
+        let early_avg: f64 = early_scores.iter().sum::<u32>() as f64 / early_scores.len() as f64;
+        let late_avg: f64 = late_scores.iter().sum::<u32>() as f64 / late_scores.len() as f64;
+
+        assert!(
+            late_avg > early_avg,
+            "TC training should improve: early avg {early_avg:.0}, late avg {late_avg:.0}"
+        );
+    }
+
+    #[test]
+    fn tc_hogwild_plays_all_games() {
+        let tables = tables();
+        let network = small_network();
+        let tc_state = TcState::new(network.num_weights());
+        let stats = train_tc_hogwild_batch(&network, &tc_state, &tables, 1.0, 4, 100, 42);
+        assert_eq!(stats.games_played, 100);
+        assert!(stats.total_moves > 0);
+        assert!(stats.total_score > 0);
+    }
+
+    #[test]
+    fn tc_hogwild_modifies_weights() {
+        let tables = tables();
+        let network = small_network();
+        let tc_state = TcState::new(network.num_weights());
+        let board = Board::new();
+        let initial = network.evaluate(&board);
+        train_tc_hogwild_batch(&network, &tc_state, &tables, 1.0, 4, 100, 42);
+        let after = network.evaluate(&board);
+        assert_ne!(initial, after);
+    }
+
+    #[test]
+    fn tc_hogwild_produces_no_nan_or_inf_weights() {
+        let tables = tables();
+        let network = four_pattern_network();
+        let tc_state = TcState::new(network.num_weights());
+        train_tc_hogwild_batch(&network, &tc_state, &tables, 1.0, 4, 500, 42);
+
+        let mut rng = SmallRng::seed_from_u64(99);
+        for _ in 0..20 {
+            let mut board = Board::new();
+            for row in 0..4 {
+                for col in 0..4 {
+                    board.set_tile(row, col, rng.random_range(0..10));
+                }
+            }
+            let value = network.evaluate(&board);
+            assert!(value.is_finite(), "TC weight eval produced non-finite value: {value}");
+        }
+    }
+
+    #[test]
+    fn tc_hogwild_training_improves_over_many_games() {
+        let tables = tables();
+        let network = four_pattern_network();
+        let tc_state = TcState::new(network.num_weights());
+
+        // Baseline avg score from a cold network (no learning).
+        let mut rng = SmallRng::seed_from_u64(1);
+        let mut baseline_score = 0u64;
+        for _ in 0..100 {
+            let result = train_one_game(&network, &tables, 0.0, &mut rng);
+            baseline_score += result.score as u64;
+        }
+        let baseline_avg = baseline_score as f64 / 100.0;
+
+        // Under hogwild, multiple threads push different TD errors from
+        // concurrent games into the same E/A accumulators, which suppresses
+        // alpha for all weights (the coherence signal mixes across games).
+        // A moderate beta compensates; actual training runs sweep beta values.
+        let network = four_pattern_network();
+        let tc_state = TcState::new(network.num_weights());
+        train_tc_hogwild_batch(&network, &tc_state, &tables, 0.1, 4, 3000, 7);
+        let late_stats = train_tc_hogwild_batch(&network, &tc_state, &tables, 0.1, 4, 2000, 99);
+        let late_avg = late_stats.total_score as f64 / late_stats.games_played as f64;
+
+        assert!(
+            late_avg > baseline_avg,
+            "TC Hogwild training failed to improve: baseline avg {baseline_avg:.0}, \
+             after 3000+2000 games late avg {late_avg:.0}"
+        );
     }
 }

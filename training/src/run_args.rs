@@ -53,7 +53,11 @@ pub struct RunArgs {
     #[arg(long, default_value = "4x6")]
     pub patterns: String,
 
-    /// Learning rate for TD(0) updates
+    /// Learning rate (alpha) for TD algorithms, or meta-learning rate (beta)
+    /// for TC algorithms. For TD, this is the fixed per-update step size
+    /// (typical: 0.0025). For TC, this scales the per-weight adaptive rates
+    /// that TC computes automatically (typical: 1.0 for serial, lower for
+    /// tc-hogwild where concurrent updates add noise to the coherence signal).
     #[arg(long, default_value_t = 0.0025)]
     pub learning_rate: f32,
 
@@ -66,8 +70,10 @@ pub struct RunArgs {
     #[arg(long)]
     pub description: Option<String>,
 
-    /// Training algorithm: "serial" (single-threaded) or "hogwild" (lock-free
-    /// shared-memory parallelism).
+    /// Training algorithm: "serial", "hogwild", "tc" (TC learning, serial),
+    /// or "tc-hogwild" (TC learning, parallel). For TC algorithms,
+    /// --learning-rate is used as the beta meta-learning rate (default 1.0
+    /// recommended for serial TC, lower for tc-hogwild).
     #[arg(long, default_value = "serial")]
     pub algorithm: String,
 

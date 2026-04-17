@@ -2,32 +2,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use game_engine::Board;
 
+use crate::memory::hint_huge_pages;
+
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::_pext_u64;
-
-/// Hints the kernel that a large allocation should be backed by 2 MiB
-/// transparent huge pages. A 268 MiB weight table covers ~65k 4 KiB pages —
-/// enough to blow past the ~2k-entry L2 dTLB. 2 MiB pages cut that to ~134,
-/// which fits comfortably in TLB. Measured perf stat showed 560M dTLB misses
-/// under hogwild-15 on the 4x6 table; this collapses that to the hundred-M
-/// range. Best-effort — if the kernel can't allocate huge pages, madvise
-/// returns success and we just stay on 4 KiB.
-#[cfg(target_os = "linux")]
-fn hint_huge_pages(ptr: *const u8, len: usize) {
-    if len == 0 {
-        return;
-    }
-    unsafe {
-        libc::madvise(
-            ptr as *mut libc::c_void,
-            len,
-            libc::MADV_HUGEPAGE,
-        );
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn hint_huge_pages(_ptr: *const u8, _len: usize) {}
 
 /// The number of possible tile values (0=empty, 1=2, ..., 15=32768).
 const TILE_VALUES: usize = 16;
@@ -280,6 +258,66 @@ impl NTupleNetwork {
         self.masks.len() * 8
     }
 
+    pub fn num_weights(&self) -> usize {
+        self.weights.len()
+    }
+
+    /// TC learning weight update: adaptive per-weight learning rate.
+    ///
+    /// Instead of a fixed learning rate, each weight's rate is determined by
+    /// its coherence ratio α_i = |E_i| / A_i from the TC accumulators.
+    /// `beta` is the meta-learning rate (typically 1.0), `td_error` is the
+    /// raw TD error (not pre-scaled).
+    #[inline]
+    pub fn tc_update(
+        &self,
+        board: &Board,
+        tc_state: &crate::tc_state::TcState,
+        td_error: f32,
+        beta: f32,
+    ) {
+        let orientations = Self::orientations(board.raw());
+        let num_features = (self.masks.len() * 8) as f32;
+        for &oriented in &orientations {
+            self.tc_update_orientation(tc_state, oriented, td_error, beta, num_features);
+        }
+    }
+
+    /// TC update for a single board orientation.
+    ///
+    /// For each pattern weight: read adaptive rate, apply scaled update,
+    /// then accumulate the TD error into TC state. The accumulation happens
+    /// after the rate read so α_i reflects errors *prior to* this update.
+    #[inline(always)]
+    fn tc_update_orientation(
+        &self,
+        tc_state: &crate::tc_state::TcState,
+        raw: u64,
+        td_error: f32,
+        beta: f32,
+        num_features: f32,
+    ) {
+        // Under hogwild, racy weight updates can cascade into Inf evaluations,
+        // producing NaN TD errors (Inf - Inf). Skip the entire orientation if
+        // the td_error is already poisoned.
+        if !td_error.is_finite() {
+            return;
+        }
+        for (pattern_index, &mask) in self.masks.iter().enumerate() {
+            let index = pext(raw, mask) as usize;
+            let offset = pattern_index * Self::TABLE_SIZE + index;
+            let adaptive_rate = tc_state.adaptive_rate(offset);
+            let delta = beta * (adaptive_rate / num_features) * td_error;
+            let slot = unsafe { self.weights.get_unchecked(offset) };
+            let old_bits = slot.load(Ordering::Relaxed);
+            let new_value = f32::from_bits(old_bits) + delta;
+            if new_value.is_finite() {
+                slot.store(new_value.to_bits(), Ordering::Relaxed);
+            }
+            tc_state.accumulate(offset, td_error);
+        }
+    }
+
     /// Saves the network to a binary file.
     /// Format: [num_masks: u32] [masks: u64...] [weights: f32...]
     /// Weights are written as f32 bytes (reinterpreted from the underlying
@@ -335,6 +373,16 @@ impl NTupleNetwork {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn num_weights_equals_masks_times_table_size() {
+        let base_patterns = vec![
+            vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)],
+            vec![(1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1)],
+        ];
+        let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        assert_eq!(network.num_weights(), 2 * NTupleNetwork::TABLE_SIZE);
+    }
 
     #[test]
     fn pext_extracts_correct_bits() {
@@ -517,5 +565,71 @@ mod tests {
             late_avg > early_avg,
             "Expected improvement: early avg {early_avg:.0}, late avg {late_avg:.0}"
         );
+    }
+
+    #[test]
+    fn tc_update_with_fresh_state_modifies_weights() {
+        use crate::tc_state::TcState;
+
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
+        let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        let tc_state = TcState::new(network.num_weights());
+
+        let mut board = Board::new();
+        board.set_tile(0, 0, 1);
+        board.set_tile(1, 1, 2);
+
+        let before = network.evaluate(&board);
+        network.tc_update(&board, &tc_state, 100.0, 1.0);
+        let after = network.evaluate(&board);
+
+        assert!(after > before, "TC update should increase evaluation");
+    }
+
+    #[test]
+    fn tc_update_coherent_weights_learn_faster_than_oscillating() {
+        use crate::tc_state::TcState;
+
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
+        let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        let tc_state = TcState::new(network.num_weights());
+
+        let mut board = Board::new();
+        board.set_tile(0, 0, 1);
+
+        // Apply several consistent positive updates
+        for _ in 0..10 {
+            network.tc_update(&board, &tc_state, 50.0, 1.0);
+        }
+        let coherent_value = network.evaluate(&board);
+
+        // Reset network, apply alternating updates (same magnitude)
+        let network2 = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        let tc_state2 = TcState::new(network2.num_weights());
+        for step in 0..10 {
+            let error = if step % 2 == 0 { 50.0 } else { -50.0 };
+            network2.tc_update(&board, &tc_state2, error, 1.0);
+        }
+        let oscillating_value = network2.evaluate(&board).abs();
+
+        assert!(
+            coherent_value.abs() > oscillating_value,
+            "Coherent updates should produce larger weight magnitude \
+             ({coherent_value}) than oscillating ({oscillating_value})"
+        );
+    }
+
+    #[test]
+    fn tc_update_is_callable_via_shared_reference() {
+        use crate::tc_state::TcState;
+
+        let base_patterns = vec![vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]];
+        let network = NTupleNetwork::with_symmetry_expansion(&base_patterns, 0.0);
+        let tc_state = TcState::new(network.num_weights());
+
+        let shared_ref: &NTupleNetwork = &network;
+        let board = Board::new();
+        shared_ref.tc_update(&board, &tc_state, 10.0, 1.0);
+        assert!(shared_ref.evaluate(&board) != 0.0);
     }
 }

@@ -20,7 +20,8 @@ use rand::rngs::SmallRng;
 use serde::Serialize;
 use training::config::{select_patterns, validate_algorithm};
 use training::ntuple::NTupleNetwork;
-use training::training::{train_hogwild_batch, train_one_game};
+use training::tc_state::TcState;
+use training::training::{train_hogwild_batch, train_one_game, train_one_game_tc, train_tc_hogwild_batch};
 
 /// Benchmark a training configuration and emit throughput + convergence
 /// metrics.
@@ -47,7 +48,8 @@ struct Args {
     #[arg(long, default_value_t = 1)]
     threads: u32,
 
-    /// Learning rate for TD(0) updates.
+    /// Learning rate (alpha) for TD algorithms, or meta-learning rate (beta)
+    /// for TC algorithms. See --algorithm for details.
     #[arg(long, default_value_t = 0.0025)]
     learning_rate: f32,
 
@@ -99,6 +101,46 @@ fn run_hogwild_bench(
         network,
         tables,
         learning_rate,
+        threads,
+        games,
+        seed ^ 0xDEADBEEF,
+    );
+    (stats.total_score, stats.total_moves)
+}
+
+fn run_tc_serial_bench(
+    network: &NTupleNetwork,
+    tc_state: &TcState,
+    tables: &MoveTables,
+    beta: f32,
+    games: u32,
+    seed: u64,
+) -> (u64, u64) {
+    let mut rng = SmallRng::seed_from_u64(seed ^ 0xDEADBEEF);
+    let mut total_score: u64 = 0;
+    let mut total_moves: u64 = 0;
+    for _ in 0..games {
+        let result = train_one_game_tc(network, tc_state, tables, beta, &mut rng);
+        total_score += result.score as u64;
+        total_moves += result.moves as u64;
+    }
+    (total_score, total_moves)
+}
+
+fn run_tc_hogwild_bench(
+    network: &NTupleNetwork,
+    tc_state: &TcState,
+    tables: &MoveTables,
+    beta: f32,
+    threads: u32,
+    games: u32,
+    seed: u64,
+) -> (u64, u64) {
+    let stats = train_tc_hogwild_batch(
+        network,
+        tc_state,
+        tables,
+        beta,
         threads,
         games,
         seed ^ 0xDEADBEEF,
@@ -173,10 +215,21 @@ fn main() {
 
     let tables = MoveTables::new();
     let network = NTupleNetwork::with_symmetry_expansion(&patterns, 0.0);
-    let mut warmup_rng = SmallRng::seed_from_u64(args.seed);
+    let is_tc = args.algorithm.starts_with("tc");
+    let tc_state = if is_tc {
+        Some(TcState::new(network.num_weights()))
+    } else {
+        None
+    };
 
+    // Warmup: use the matching algorithm so TC accumulators are primed.
+    let mut warmup_rng = SmallRng::seed_from_u64(args.seed);
     for _ in 0..args.warmup_games {
-        train_one_game(&network, &tables, args.learning_rate, &mut warmup_rng);
+        if let Some(ref tc) = tc_state {
+            train_one_game_tc(&network, tc, &tables, args.learning_rate, &mut warmup_rng);
+        } else {
+            train_one_game(&network, &tables, args.learning_rate, &mut warmup_rng);
+        }
     }
 
     let start = Instant::now();
@@ -184,6 +237,23 @@ fn main() {
         "serial" => run_serial_bench(&network, &tables, args.learning_rate, args.games, args.seed),
         "hogwild" => run_hogwild_bench(
             &network,
+            &tables,
+            args.learning_rate,
+            args.threads,
+            args.games,
+            args.seed,
+        ),
+        "tc" => run_tc_serial_bench(
+            &network,
+            tc_state.as_ref().unwrap(),
+            &tables,
+            args.learning_rate,
+            args.games,
+            args.seed,
+        ),
+        "tc-hogwild" => run_tc_hogwild_bench(
+            &network,
+            tc_state.as_ref().unwrap(),
             &tables,
             args.learning_rate,
             args.threads,

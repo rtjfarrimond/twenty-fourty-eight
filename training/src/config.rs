@@ -50,21 +50,22 @@ pub fn validate_init_mode(optimistic_init: f32, random_init_amplitude: f32) {
 /// Panics with a user-facing message on invalid combinations.
 pub fn validate_algorithm(algorithm: &str, threads: u32) {
     match algorithm {
-        "serial" => {
+        "serial" | "tc" => {
             if threads != 1 {
                 panic!(
-                    "serial algorithm requires --threads 1 (got {threads}). \
-                     Use --algorithm hogwild for multi-threaded training."
+                    "{algorithm} algorithm requires --threads 1 (got {threads}). \
+                     Use --algorithm hogwild or tc-hogwild for multi-threaded training."
                 );
             }
         }
-        "hogwild" => {
+        "hogwild" | "tc-hogwild" => {
             if threads == 0 {
-                panic!("hogwild algorithm requires --threads >= 1 (got 0).");
+                panic!("{algorithm} algorithm requires --threads >= 1 (got 0).");
             }
         }
         other => panic!(
-            "Unknown algorithm: {other}. Expected \"serial\" or \"hogwild\"."
+            "Unknown algorithm: {other}. \
+             Expected \"serial\", \"hogwild\", \"tc\", or \"tc-hogwild\"."
         ),
     }
 }
@@ -110,13 +111,13 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "serial algorithm requires --threads 1")]
+    #[should_panic(expected = "requires --threads 1")]
     fn serial_with_multiple_threads_rejected() {
         validate_algorithm("serial", 4);
     }
 
     #[test]
-    #[should_panic(expected = "serial algorithm requires --threads 1")]
+    #[should_panic(expected = "requires --threads 1")]
     fn serial_with_zero_threads_rejected() {
         validate_algorithm("serial", 0);
     }
@@ -128,9 +129,32 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "hogwild algorithm requires --threads >= 1")]
+    #[should_panic(expected = "requires --threads >= 1")]
     fn hogwild_with_zero_threads_rejected() {
         validate_algorithm("hogwild", 0);
+    }
+
+    #[test]
+    fn tc_serial_with_single_thread_is_valid() {
+        validate_algorithm("tc", 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires --threads 1")]
+    fn tc_serial_with_multiple_threads_rejected() {
+        validate_algorithm("tc", 4);
+    }
+
+    #[test]
+    fn tc_hogwild_with_positive_thread_count_is_valid() {
+        validate_algorithm("tc-hogwild", 4);
+        validate_algorithm("tc-hogwild", 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires --threads >= 1")]
+    fn tc_hogwild_with_zero_threads_rejected() {
+        validate_algorithm("tc-hogwild", 0);
     }
 
     #[test]

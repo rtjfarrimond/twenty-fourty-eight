@@ -590,3 +590,35 @@ characteristics — would forfeit the score plateau we've reached with
 
 ---
 
+## 20. TC (Temporal Coherence) Learning
+
+**Decision:** Implement TC(0) learning as an alternative to fixed-rate TD(0).
+TC replaces the fixed learning rate α with per-weight adaptive rates based
+on update coherence (Jaśkowski 2016, "Mastering 2048 with Delayed Temporal
+Coherence Learning").
+
+**Algorithm:** For each weight i touched during a TD update with raw error δ:
+1. Compute coherence ratio: α_i = |E_i| / A_i (or 1.0 if A_i = 0)
+2. Update weight: V_i += β × (α_i / m) × δ
+3. Accumulate signed error: E_i += δ
+4. Accumulate absolute error: A_i += |δ|
+
+Where β is the meta-learning rate (default 1.0), m is total feature count
+(base patterns × 8 symmetries). E and A persist across games, never reset.
+
+**Rationale:**
+- Paper reports 77% improvement over fixed-rate TD at 1-ply evaluation.
+- Weights receiving consistent-sign updates (coherent) keep α_i near 1.0.
+- Weights receiving oscillating updates (converged) see α_i → 0.0 automatically.
+- No eligibility traces in TC(0) — simplest variant, same training loop structure.
+- Compatible with Hogwild: E and A use same relaxed-atomic pattern as weights.
+
+**Memory cost:** 3× weight storage (V + E + A tables of identical size).
+4×6 patterns: 268 MB → 804 MB. 8×6 patterns: 537 MB → 1.6 GB.
+
+**Design:** TcState is a separate struct (not embedded in NTupleNetwork).
+The network is the inference artifact; TC accumulators are training-only state.
+Save/load format unchanged — only V weights are persisted.
+
+---
+
