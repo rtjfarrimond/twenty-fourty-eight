@@ -532,6 +532,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "game-engine",
+ "libc",
  "model",
  "notify",
  "rand",

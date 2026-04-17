@@ -527,3 +527,66 @@ upward proportionally to the expected converged score.
 
 ---
 
+## 19. Hogwild Micro-Optimization Attempts (Dead Ends)
+
+An optimization session specifically targeted at extracting more Hogwild
+throughput on the current hardware (AMD EPYC Rome / Zen 2 KVM guest, 16
+vCPUs, 16 MiB L3, THP in madvise mode). The memory-bandwidth ceiling
+identified in §12 turns out to be genuinely binding — every approach
+below either traded for nothing or net-regressed, with the one caveat
+that run-to-run variance on this shared VM is ~10–15%.
+
+### Attempts and outcomes
+
+| Attempt | Outcome | Why it failed |
+|---|---|---|
+| `panic="abort"` + `lto="fat"` | -7% hogwild-15, -14% serial | Aggressive inlining appears to hurt register allocation on this hot loop. The `lto=true` (thin) + default unwinding combination the repo already had is the faster spot on this codebase. |
+| Explicit `_mm_prefetch(T0)` of all 8N offsets per eval | -11% serial, +3.5% hogwild-15 (within noise) | Forces a stack-array to hold offsets between prefetch-issue and read phases; the extra spills outweigh the DRAM latency hiding. Out-of-order execution already batches ~10 outstanding misses implicitly. |
+| Force software PEXT fallback (nibble-by-nibble extraction loop) | 4.5× slower serial, 2× slower hogwild-15 | Despite Zen 2 microcoding PEXT at ~18 cycles, the `trailing_zeros` loop in the software version is worse. Hardware PEXT wins cleanly. |
+| Single-orientation eval × 8 (algebraic shortcut assuming 8-orbit weight symmetry) | Convergence broken (late-game avg 2536 vs early 2861, i.e. negative learning) | **Math was wrong.** Sibling weights in a board's 8-orbit are NOT actually equal: the σ_k permutation on pattern-p index space depends on the full board, not just its pattern-p index. Two boards sharing a pattern-p index have different "orbit friends" for other patterns, so weights diverge with training. Verified empirically: 173% relative error after 200 games of training. |
+| Thread pinning workers to distinct cores via `sched_setaffinity` | -7% hogwild-15, -8% hogwild-8 | KVM vCPU-to-physical-core mapping is opaque, so guest-side pinning restricts the scheduler without actually pinning physical cores. Default Linux scheduler already spreads load well on this environment. |
+| Caching eval offsets in `MoveCandidate` and skipping 8N PEXTs in update | -12% to -27% serial/hogwild | The 256-byte `[u32; 64]` offset cache bloats MoveCandidate past the size where the compiler keeps it in registers. Every `current = next` becomes a large memory copy. Tried external ping-pong buffers; same problem — the scratch handoff costs more than the PEXTs saved. |
+| THP madvise(`MADV_HUGEPAGE`) on the weight table | No measurable effect | THP is enabled in `madvise` mode on this kernel, but neither a Rust program nor a minimal C test produced any `AnonHugePages` after madvise + touch. Likely the KVM host refuses huge page backing. The madvise call is harmless (no-op when THP isn't available) so the hint was kept for portability. |
+
+### What was actually kept
+
+- `hint_huge_pages` madvise call (harmless on this VM, real win on hosts
+  where THP works).
+- `const TABLE_SIZE = 16^6` replacing the per-struct `table_size` field
+  (tiny codegen win; mostly a tidiness change since the compiler could
+  already constant-propagate the field).
+- `libc` as an explicit dependency (supports the madvise hint).
+
+No speedup beyond run-to-run noise was realized on this hardware. The
+ceiling identified in §12 holds: with the weight table 16× larger than
+L3, hogwild-15 is genuinely bandwidth-bound, and the only remaining
+levers are (a) reducing bytes-per-lookup (f16/bfloat16 — see below), or
+(b) running on a machine with a bigger L3 or HBM bandwidth.
+
+### Why bfloat16 / f16 weights were not attempted
+
+bfloat16 has a 7-bit mantissa. At weight magnitudes around 10²–10³ (the
+typical converged scale) the representable resolution is ≈ weight·2⁻⁷ =
+~8. TD(0) updates are α·δ ≈ 10⁻³ — three orders of magnitude below bf16
+resolution, so updates round away to zero and learning stops. Standard
+f16 has 10-bit mantissa but an 8-bit exponent too narrow for the full
+weight range during optimistic-init runs.
+
+Making half-precision work would require either stochastic rounding
+(which preserves expected value under truncation but adds per-update
+RNG cost) or INT16 fixed-point with a carefully chosen scale factor.
+Both are real refactors that change the weight file format and require
+fresh convergence validation — left for a future session.
+
+### Aspirational gap
+
+moporgic/TDL2048 reports ~11.5M moves/sec single-threaded for training
+with 4-tuple patterns. Our serial-1 with 6-tuple patterns is ~1.7M.
+The gap is primarily tuple-size × architecture: their 4-tuple tables
+(~4 MiB each) fit comfortably in L2, ours don't fit in L3. Bridging
+requires either switching to 4-tuple models (different convergence
+characteristics — would forfeit the score plateau we've reached with
+6-tuples) or quantized weights. Logged in FUTURE.md.
+
+---
+
