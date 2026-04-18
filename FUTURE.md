@@ -38,6 +38,18 @@ Options, pick one or combine:
 
 Minimum viable: (3) + (2). Ideal: (1) with N=3 runs per config.
 
+### Rust toolchain & target-cpu investigation
+Pinned to rustc 1.93.0 because 1.94.1 produces broken TC-hogwild codegen
+(model doesn't learn at all). Additionally, `target-cpu=native` in
+`.cargo/config.toml` may affect training quality — builds without it
+produce weaker models (80K avg vs 232K avg at 1M games, same code).
+Need to:
+1. Test recent toolchain versions (1.93.0, 1.94.0, 1.94.1, nightly) with
+   a short TC-hogwild run (100K games) and compare learning curves.
+2. Confirm `target-cpu=native` effect — clean build + deploy + 100K run
+   with and without, compare results.
+3. If 1.94.x is confirmed broken, file a rustc bug with a minimal repro.
+
 ### Multi-stage training
 Train separate value functions by max-tile threshold (e.g. stage 1
 targets 2048, stage 2 targets 4096, etc.). Papers report +30-50%

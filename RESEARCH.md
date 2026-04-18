@@ -121,6 +121,37 @@ Dense arrays are standard.
 3. **Tuple index computation:** index = Σ tile_exponent × 16^position_in_tuple.
 4. **Terminal states:** V(terminal) = 0.
 
+## Our Results
+
+### TC-Hogwild Optimistic Init Sweep (beta=0.5, 8x6, 1M games, 14 threads)
+
+| K | Final Avg | 8192% | 16384% | Notes |
+|---|-----------|-------|--------|-------|
+| 0 (baseline) | 232,604 | 89.1 | 53.3 | No optimistic init |
+| **100** | **242,928** | **91.7** | **55.6** | **New best** |
+| 500 | 1,432 | 0.0 | 0.0 | Diverged |
+| 1000 | 972 | 0.0 | 0.0 | Diverged |
+| 2000 | 151,516 | 86.6 | 1.7 | Recovered but plateaued low |
+| 5000 | 141,453 | 80.7 | 0.4 | Similar to K=2000 |
+
+**Key findings:**
+- K=100 gives a modest improvement over the no-init baseline (+4.4% avg score).
+- K=500–1000 diverges completely — TC's adaptive rates can't correct the
+  large initial bias, and the coherence signal gets poisoned.
+- K=2000–5000 recovers but never catches the baseline. The non-monotonic
+  behaviour suggests the interaction between optimistic init magnitude and
+  TC's per-weight adaptive rates is sensitive to the ratio between K and
+  the natural value scale at different training stages.
+- Optimistic init helps TC less dramatically than it helps plain TD. This
+  makes sense: TC already adapts per-weight learning rates, so the
+  exploration benefit of optimistic init is partially redundant.
+
+**Next steps:**
+1. Fine sweep around K=100 (K=50, 75, 100, 150, 200) to refine the optimum.
+2. Longer training runs (5M, 10M games) with the best K to see if the
+   advantage persists or compounds.
+3. Investigate the `target-cpu=native` effect on training quality (see FUTURE.md).
+
 ## Phase 2 Target (TBD)
 
 "Surpassing SOTA" could mean:
