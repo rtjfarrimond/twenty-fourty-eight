@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
-use training::queue::QueueDir;
-use training::queue_ops::QueueSnapshot;
+use queue::queue::QueueDir;
+use queue::queue_ops::QueueSnapshot;
 
 pub async fn queue_stream(
     queue_dir: PathBuf,

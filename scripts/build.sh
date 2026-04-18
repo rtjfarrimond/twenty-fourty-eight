@@ -14,6 +14,10 @@ echo "--- Building model crate ---"
 cd "$PROJECT_ROOT/model"
 cargo build --release
 
+echo "--- Building queue crate ---"
+cd "$PROJECT_ROOT/queue"
+cargo build --release
+
 echo "--- Building training binaries ---"
 cd "$PROJECT_ROOT/training"
 cargo build --release

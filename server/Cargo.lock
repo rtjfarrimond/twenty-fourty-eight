@@ -776,6 +776,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "queue"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "rand",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -951,13 +961,13 @@ dependencies = [
  "game-engine",
  "model",
  "notify",
+ "queue",
  "rand",
  "serde",
  "serde_json",
  "tokio",
  "toml",
  "tower-http",
- "training",
  "uuid",
 ]
 
@@ -1213,21 +1223,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
-]
-
-[[package]]
-name = "training"
-version = "0.1.0"
-dependencies = [
- "clap",
- "game-engine",
- "libc",
- "model",
- "notify",
- "rand",
- "serde",
- "serde_json",
- "toml",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ lto = true
 codegen-units = 1
 
 [dependencies]
+queue = { path = "../queue" }
 game-engine = { path = "../engine" }
 model = { path = "../model" }
 rand = "0.9"
