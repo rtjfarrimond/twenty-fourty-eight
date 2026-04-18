@@ -21,27 +21,27 @@ progress in real-time as it runs.
 
 ## Architecture
 
-Everything is Rust, structured as five crates:
+Everything is Rust, structured as five crates that produce two independently
+deployable binaries:
+
+```
+┌─ training binary ──────────────────────┐  ┌─ server binary ──────┐
+│                                        │  │                      │
+│  training daemon   (long-running svc)  │  │  HTTP / WebSocket /  │
+│    │                                   │  │  SSE queue stream    │
+│    └► training run (batch, per job)    │  │                      │
+│                                        │  │  queue model engine  │
+│  queue  model  engine                  │  └──────────────────────┘
+└────────────────────────────────────────┘
+```
 
 - **engine** — `u64` bitboard with precomputed move tables
 - **model** — serialization format, `Agent` trait for inference
-- **queue** — persistent filesystem-backed job queue (standalone, no engine/model dependency)
+- **queue** — persistent filesystem-backed job queue (shared by both binaries)
 - **training** — TD(0) learning loop, evaluation, queue daemon, CLI
-- **server** — axum websocket server, hot model loading via inotify, SSE
-  training stream
+- **server** — axum websocket server, hot model loading via inotify
 
-```mermaid
-graph BT
-  engine
-  model --> engine
-  queue
-  training --> model
-  training --> queue
-  server --> model
-  server --> queue
-```
-
-Training and server are independently deployable — see `scripts/DEPLOYMENT.md`.
+See `scripts/DEPLOYMENT.md` for the deployment runbook.
 
 The frontend is Rust/WASM, rendering game state received over websocket.
 
