@@ -4,7 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use training::eval;
 use training::eval_dummy;
-use training::ntuple::NTupleNetwork;
 
 #[derive(Serialize)]
 struct ModelEntry {
@@ -61,33 +60,38 @@ fn main() {
     let tables = MoveTables::new();
     let mut models = Vec::new();
 
-    // Scan for .bin files in the models directory
+    // Discover models: scan for .meta.toml files. Models with a .bin
+    // can fall back to fresh eval; ephemeral models (no .bin) require
+    // a training log for their eval data.
     if models_dir.exists() {
-        let mut bin_files: Vec<_> = fs::read_dir(&models_dir)
+        let mut meta_files: Vec<_> = fs::read_dir(&models_dir)
             .unwrap()
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.path().extension().map_or(false, |ext| ext == "bin"))
+            .filter(|entry| {
+                entry.path().extension().map_or(false, |ext| ext == "toml")
+                    && entry.path().to_string_lossy().ends_with(".meta.toml")
+            })
             .collect();
 
-        bin_files.sort_by_key(|entry| entry.file_name());
+        meta_files.sort_by_key(|entry| entry.file_name());
 
-        for entry in bin_files {
-            let bin_path = entry.path();
-            let stem = bin_path.file_stem().unwrap().to_string_lossy().to_string();
+        for entry in meta_files {
+            let meta_path = entry.path();
+            let filename = meta_path.file_name().unwrap().to_string_lossy();
+            let stem = filename.strip_suffix(".meta.toml").unwrap().to_string();
 
-            // Load metadata from sidecar .meta.toml
-            let meta_path = models_dir.join(format!("{stem}.meta.toml"));
             let (name, description) = load_metadata(&meta_path, &stem);
 
-            // Look for training log
-            let log_path = training_dir.join(format!("{stem}.log.jsonl"));
+            // Look for training log in both models dir and training dir
+            let log_path_models = models_dir.join(format!("{stem}.log.jsonl"));
+            let log_path_training = training_dir.join(format!("{stem}.log.jsonl"));
+            let log_path = if log_path_models.exists() {
+                log_path_models
+            } else {
+                log_path_training
+            };
             let training_curve = load_training_curve(&log_path);
 
-            // Prefer the last training-log checkpoint over a fresh eval —
-            // fresh eval uses a non-deterministic RNG, so re-running this
-            // binary produced different numbers than the live training
-            // dashboard showed at training-end time. Using the logged
-            // checkpoint keeps the results table and live view consistent.
             let final_eval = match training_curve.as_ref().and_then(|c| c.last().cloned()) {
                 Some(last) => {
                     println!(
@@ -97,14 +101,11 @@ fn main() {
                     last
                 }
                 None => {
-                    println!(
-                        "No training log for {name}; running fresh eval ({eval_games} games)..."
+                    eprintln!(
+                        "WARNING: skipping {name} — no training log found. \
+                         Re-run training with eval logging to include this model."
                     );
-                    let network = NTupleNetwork::load(bin_path.to_str().unwrap())
-                        .unwrap_or_else(|err| {
-                            panic!("Failed to load {}: {err}", bin_path.display())
-                        });
-                    eval::evaluate(&network, &tables, eval_games, 0)
+                    continue;
                 }
             };
             println!(

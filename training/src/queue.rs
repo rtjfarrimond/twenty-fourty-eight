@@ -250,6 +250,7 @@ mod tests {
             description: None,
             algorithm: "serial".into(),
             threads: 1,
+            ephemeral: false,
         }
     }
 

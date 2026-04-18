@@ -80,6 +80,13 @@ pub struct RunArgs {
     /// Number of worker threads. Must be 1 for the serial algorithm.
     #[arg(long, default_value_t = 1)]
     pub threads: u32,
+
+    /// Ephemeral run: train and evaluate but do not save the model .bin
+    /// or deploy. Only the .log.jsonl and .config.json are written.
+    /// Useful for parameter sweeps where the training curve is the goal,
+    /// not the model artefact.
+    #[arg(long, default_value_t = false)]
+    pub ephemeral: bool,
 }
 
 impl RunArgs {
@@ -106,6 +113,9 @@ impl RunArgs {
             argv.push("--description".into());
             argv.push(desc.clone());
         }
+        if self.ephemeral {
+            argv.push("--ephemeral".into());
+        }
         argv
     }
 }
@@ -129,6 +139,7 @@ mod tests {
             description: None,
             algorithm: "serial".into(),
             threads: 1,
+            ephemeral: false,
         }
     }
 
@@ -142,6 +153,28 @@ mod tests {
         assert_eq!(args.algorithm, parsed.algorithm);
         assert_eq!(args.learning_rate, parsed.learning_rate);
         assert_eq!(args.models_dir, parsed.models_dir);
+        assert_eq!(args.ephemeral, parsed.ephemeral);
+    }
+
+    #[test]
+    fn ephemeral_defaults_to_false() {
+        let args = sample_args();
+        assert!(!args.ephemeral);
+    }
+
+    #[test]
+    fn to_argv_includes_ephemeral_when_set() {
+        let mut args = sample_args();
+        args.ephemeral = true;
+        let argv = args.to_argv();
+        assert!(argv.iter().any(|s| s == "--ephemeral"));
+    }
+
+    #[test]
+    fn to_argv_omits_ephemeral_when_false() {
+        let args = sample_args();
+        let argv = args.to_argv();
+        assert!(!argv.iter().any(|s| s == "--ephemeral"));
     }
 
     #[test]

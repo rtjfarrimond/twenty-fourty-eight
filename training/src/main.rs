@@ -128,14 +128,16 @@ fn print_section(label: &str, jobs: &[training::queue::Job]) {
     }
     println!("{label} ({}):", jobs.len());
     for job in jobs {
+        let ephemeral_tag = if job.args.ephemeral { " [ephemeral]" } else { "" };
         println!(
-            "  {}  by {:>10}  {} games {}/{}t  model={}",
+            "  {}  by {:>10}  {} games {}/{}t  model={}{}",
             job.id.as_str(),
             job.submitted_by,
             job.args.games,
             job.args.algorithm,
             job.args.threads,
             job.args.model_name,
+            ephemeral_tag,
         );
     }
 }

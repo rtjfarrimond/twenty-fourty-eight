@@ -97,6 +97,16 @@ else
     echo "--- Config exists, not overwriting ---"
 fi
 
+# Install Claude Code skills for any user with ~/.claude/skills/
+echo "--- Installing Claude Code skills ---"
+SKILLS_DIR="$HOME/.claude/skills"
+mkdir -p "$SKILLS_DIR"
+for skill in "$PROJECT_ROOT"/skills/*.md; do
+    [ -f "$skill" ] || continue
+    cp "$skill" "$SKILLS_DIR/"
+    echo "  Installed $(basename "$skill")"
+done
+
 # Install model metadata (always update — these are checked into the repo)
 echo "--- Installing model metadata ---"
 for meta in "$PROJECT_ROOT"/config/models/*.meta.toml; do

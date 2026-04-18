@@ -35,12 +35,17 @@ pub fn execute(args: &RunArgs) -> Result<(), String> {
     let mut log_writer = BufWriter::new(log_file);
     run_training(&network, &tables, args, &mut log_writer);
 
-    let model_path = format!("{}.bin", args.model_name);
-    network.save(&model_path)
-        .map_err(|err| format!("Failed to save model: {err}"))?;
     println!("\nTraining complete.");
 
-    deploy_model(args, &args.models_dir, &model_path, &log_path, &config_path);
+    if args.ephemeral {
+        println!("  Ephemeral run — model not saved.");
+        deploy_ephemeral(args, &args.models_dir, &log_path, &config_path);
+    } else {
+        let model_path = format!("{}.bin", args.model_name);
+        network.save(&model_path)
+            .map_err(|err| format!("Failed to save model: {err}"))?;
+        deploy_model(args, &args.models_dir, &model_path, &log_path, &config_path);
+    }
     Ok(())
 }
 
@@ -125,6 +130,9 @@ fn print_banner(
         patterns.len() * 8
     );
     println!("  Algorithm: {} ({} thread(s))", args.algorithm, args.threads);
+    if args.ephemeral {
+        println!("  Mode: ephemeral (no .bin saved)");
+    }
     println!("  Log file: {log_path}");
     println!("  Config file: {config_path}");
     println!("  Deploy to: {}", args.models_dir.display());
@@ -269,20 +277,8 @@ fn move_to(source: &str, destination: &PathBuf) {
     println!("  Moved {source} → {}", destination.display());
 }
 
-fn deploy_model(
-    args: &RunArgs,
-    models_dir: &PathBuf,
-    model_path: &str,
-    log_path: &str,
-    config_path: &str,
-) {
-    println!("\nDeploying to {}...", models_dir.display());
-
-    move_to(model_path, &models_dir.join(format!("{}.bin", args.model_name)));
-    move_to(log_path, &models_dir.join(log_path));
-    move_to(config_path, &models_dir.join(config_path));
-
-    let description = args.description.clone().unwrap_or_else(|| {
+fn build_description(args: &RunArgs) -> String {
+    args.description.clone().unwrap_or_else(|| {
         format!(
             "N-tuple network ({} preset) trained via {} algorithm \
              ({} thread(s)). {} training games, lr={}, optimistic_init={}, \
@@ -296,8 +292,11 @@ fn deploy_model(
             args.random_init_amplitude,
             args.random_init_seed,
         )
-    });
+    })
+}
 
+fn write_meta_toml(args: &RunArgs, models_dir: &PathBuf) {
+    let description = build_description(args);
     let meta_path = models_dir.join(format!("{}.meta.toml", args.model_name));
     let meta_content = format!(
         "name = \"{}\"\ndescription = \"{}\"\n",
@@ -305,7 +304,34 @@ fn deploy_model(
     );
     std::fs::write(&meta_path, &meta_content).expect("Failed to write meta.toml");
     println!("  Wrote {}", meta_path.display());
+}
 
+fn deploy_model(
+    args: &RunArgs,
+    models_dir: &PathBuf,
+    model_path: &str,
+    log_path: &str,
+    config_path: &str,
+) {
+    println!("\nDeploying to {}...", models_dir.display());
+    move_to(model_path, &models_dir.join(format!("{}.bin", args.model_name)));
+    move_to(log_path, &models_dir.join(log_path));
+    move_to(config_path, &models_dir.join(config_path));
+    write_meta_toml(args, models_dir);
+    run_generate_models(models_dir);
+    println!("Deploy complete.");
+}
+
+fn deploy_ephemeral(
+    args: &RunArgs,
+    models_dir: &PathBuf,
+    log_path: &str,
+    config_path: &str,
+) {
+    println!("\nDeploying results (ephemeral, no .bin)...");
+    move_to(log_path, &models_dir.join(log_path));
+    move_to(config_path, &models_dir.join(config_path));
+    write_meta_toml(args, models_dir);
     run_generate_models(models_dir);
     println!("Deploy complete.");
 }
