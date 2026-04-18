@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use training::config::{validate_algorithm, validate_init_mode};
 use training::daemon::{Daemon, SubprocessExecutor};
-use training::queue::{JobId, JobState, QueueDir};
+use training::queue::{ActiveState, JobId, JobState, QueueDir};
 use training::queue_ops::{QueueSnapshot, cancel_pending, submit};
 use training::run_args::RunArgs;
 use training::runner;
@@ -48,6 +48,15 @@ enum Command {
         /// per-job log/config sidecars are written).
         #[arg(long, default_value = DEFAULT_TRAINING_DIR)]
         training_dir: PathBuf,
+
+        /// How many hours to keep completed/failed/cancelled jobs before
+        /// automatic removal.
+        #[arg(long, default_value = "12")]
+        retention_hours: u64,
+
+        /// How often (in minutes) to run the retention reaper.
+        #[arg(long, default_value = "60")]
+        reap_interval_minutes: u64,
     },
 }
 
@@ -68,7 +77,9 @@ fn main() -> ExitCode {
         Command::Submit(args) => submit_command(&args, &cli.queue_dir),
         Command::Queue(QueueCommand::List) => list_command(&cli.queue_dir),
         Command::Queue(QueueCommand::Cancel { id }) => cancel_command(&id, &cli.queue_dir),
-        Command::Daemon { training_dir } => daemon_command(&cli.queue_dir, training_dir),
+        Command::Daemon { training_dir, retention_hours, reap_interval_minutes } => {
+            daemon_command(&cli.queue_dir, training_dir, retention_hours, reap_interval_minutes)
+        }
     }
 }
 
@@ -159,7 +170,7 @@ fn cancel_command(id_str: &str, queue_dir: &PathBuf) -> ExitCode {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             // Help the user understand why
             match queue.find(&id) {
-                Ok(Some(state)) if state != JobState::Pending => {
+                Ok(Some(state)) if state != JobState::Active(ActiveState::Pending) => {
                     eprintln!(
                         "ERROR: cannot cancel — job is in state '{}', only pending jobs are cancellable",
                         state.dir_name()
@@ -181,7 +192,12 @@ fn cancel_command(id_str: &str, queue_dir: &PathBuf) -> ExitCode {
     }
 }
 
-fn daemon_command(queue_dir: &PathBuf, training_dir: PathBuf) -> ExitCode {
+fn daemon_command(
+    queue_dir: &PathBuf,
+    training_dir: PathBuf,
+    retention_hours: u64,
+    reap_interval_minutes: u64,
+) -> ExitCode {
     let queue = QueueDir::new(queue_dir);
     let binary = match std::env::current_exe() {
         Ok(path) => path,
@@ -197,10 +213,13 @@ fn daemon_command(queue_dir: &PathBuf, training_dir: PathBuf) -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
+    let retention_max_age = std::time::Duration::from_secs(retention_hours * 3_600);
+    let reap_interval = std::time::Duration::from_secs(reap_interval_minutes * 60);
     let executor = SubprocessExecutor { binary };
-    let daemon = Daemon::new(&queue, &executor, training_dir);
+    let daemon = Daemon::new(&queue, &executor, training_dir, retention_max_age, reap_interval);
     eprintln!("Starting training queue daemon");
     eprintln!("  Queue dir:    {}", queue_dir.display());
+    eprintln!("  Retention:    {retention_hours}h (reap every {reap_interval_minutes}m)");
     if let Err(err) = daemon.serve_forever() {
         eprintln!("ERROR: daemon exited: {err}");
         return ExitCode::FAILURE;

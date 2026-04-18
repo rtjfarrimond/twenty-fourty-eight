@@ -24,36 +24,111 @@ use serde::{Deserialize, Serialize};
 
 use crate::run_args::RunArgs;
 
-/// The five possible lifecycle positions for a queued job. Each maps to a
-/// dedicated subdirectory in the queue root.
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum JobState {
+/// Non-terminal lifecycle states: the job is still in flight.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ActiveState {
     Pending,
     Running,
+}
+
+impl ActiveState {
+    pub fn all() -> [ActiveState; 2] {
+        [ActiveState::Pending, ActiveState::Running]
+    }
+
+    pub fn dir_name(self) -> &'static str {
+        match self {
+            ActiveState::Pending => "pending",
+            ActiveState::Running => "running",
+        }
+    }
+}
+
+/// Terminal lifecycle states: the job has reached a final outcome.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum TerminalState {
     Completed,
     Failed,
     Cancelled,
 }
 
-impl JobState {
-    pub fn all() -> [JobState; 5] {
+impl TerminalState {
+    pub fn all() -> [TerminalState; 3] {
         [
-            JobState::Pending,
-            JobState::Running,
-            JobState::Completed,
-            JobState::Failed,
-            JobState::Cancelled,
+            TerminalState::Completed,
+            TerminalState::Failed,
+            TerminalState::Cancelled,
         ]
     }
 
     pub fn dir_name(self) -> &'static str {
         match self {
-            JobState::Pending => "pending",
-            JobState::Running => "running",
-            JobState::Completed => "completed",
-            JobState::Failed => "failed",
-            JobState::Cancelled => "cancelled",
+            TerminalState::Completed => "completed",
+            TerminalState::Failed => "failed",
+            TerminalState::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// The five possible lifecycle positions for a queued job. Each maps to a
+/// dedicated subdirectory in the queue root. Partitioned into `Active` and
+/// `Terminal` so the type system enforces which operations apply where.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum JobState {
+    Active(ActiveState),
+    Terminal(TerminalState),
+}
+
+impl JobState {
+    pub fn all() -> [JobState; 5] {
+        [
+            JobState::Active(ActiveState::Pending),
+            JobState::Active(ActiveState::Running),
+            JobState::Terminal(TerminalState::Completed),
+            JobState::Terminal(TerminalState::Failed),
+            JobState::Terminal(TerminalState::Cancelled),
+        ]
+    }
+
+    pub fn dir_name(self) -> &'static str {
+        match self {
+            JobState::Active(state) => state.dir_name(),
+            JobState::Terminal(state) => state.dir_name(),
+        }
+    }
+}
+
+impl From<ActiveState> for JobState {
+    fn from(state: ActiveState) -> Self {
+        JobState::Active(state)
+    }
+}
+
+impl From<TerminalState> for JobState {
+    fn from(state: TerminalState) -> Self {
+        JobState::Terminal(state)
+    }
+}
+
+impl Serialize for JobState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.dir_name())
+    }
+}
+
+impl<'de> Deserialize<'de> for JobState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        match name.as_str() {
+            "pending" => Ok(JobState::Active(ActiveState::Pending)),
+            "running" => Ok(JobState::Active(ActiveState::Running)),
+            "completed" => Ok(JobState::Terminal(TerminalState::Completed)),
+            "failed" => Ok(JobState::Terminal(TerminalState::Failed)),
+            "cancelled" => Ok(JobState::Terminal(TerminalState::Cancelled)),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["pending", "running", "completed", "failed", "cancelled"],
+            )),
         }
     }
 }
@@ -78,6 +153,13 @@ impl JobId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Extract the submission unix timestamp from the id prefix.
+    /// Safe to call on any valid `JobId` (the constructor and parser both
+    /// guarantee the first 10 chars are ascii digits).
+    pub fn submitted_at_unix(&self) -> u64 {
+        self.0[..10].parse().expect("JobId prefix is always 10 ascii digits")
     }
 
     /// Validate a user-supplied id: must match the generated format.
@@ -149,18 +231,18 @@ impl QueueDir {
         Ok(())
     }
 
-    pub fn dir_for(&self, state: JobState) -> PathBuf {
-        self.root.join(state.dir_name())
+    pub fn dir_for(&self, state: impl Into<JobState>) -> PathBuf {
+        self.root.join(state.into().dir_name())
     }
 
-    fn path_for(&self, id: &JobId, state: JobState) -> PathBuf {
+    fn path_for(&self, id: &JobId, state: impl Into<JobState>) -> PathBuf {
         self.dir_for(state).join(format!("{}.json", id.as_str()))
     }
 
     /// Write a job atomically: serialize to a temp file, then rename into
     /// place. Concurrent readers see either the old file or the new one,
     /// never a partial write.
-    pub fn write(&self, job: &Job, state: JobState) -> io::Result<()> {
+    pub fn write(&self, job: &Job, state: impl Into<JobState>) -> io::Result<()> {
         let final_path = self.path_for(&job.id, state);
         let temp_path = final_path.with_extension("json.tmp");
         let json = serde_json::to_string_pretty(job)
@@ -171,7 +253,7 @@ impl QueueDir {
     }
 
     /// Read a job from a specific state directory.
-    pub fn read(&self, id: &JobId, state: JobState) -> io::Result<Job> {
+    pub fn read(&self, id: &JobId, state: impl Into<JobState>) -> io::Result<Job> {
         let path = self.path_for(id, state);
         let contents = fs::read_to_string(&path)?;
         serde_json::from_str(&contents)
@@ -184,8 +266,8 @@ impl QueueDir {
     pub fn transition(
         &self,
         id: &JobId,
-        from: JobState,
-        to: JobState,
+        from: impl Into<JobState>,
+        to: impl Into<JobState>,
     ) -> io::Result<()> {
         let source = self.path_for(id, from);
         let destination = self.path_for(id, to);
@@ -194,7 +276,7 @@ impl QueueDir {
 
     /// List job ids currently in `state`, sorted lexicographically (which
     /// equals chronological order due to JobId's padded-unix-secs prefix).
-    pub fn list(&self, state: JobState) -> io::Result<Vec<JobId>> {
+    pub fn list(&self, state: impl Into<JobState>) -> io::Result<Vec<JobId>> {
         let dir = self.dir_for(state);
         let mut ids = Vec::new();
         let entries = match fs::read_dir(&dir) {
@@ -214,6 +296,13 @@ impl QueueDir {
         }
         ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         Ok(ids)
+    }
+
+    /// Remove a job file from the given state directory. Returns
+    /// `NotFound` if the file doesn't exist (race with daemon).
+    pub fn remove(&self, id: &JobId, state: impl Into<JobState>) -> io::Result<()> {
+        let path = self.path_for(id, state);
+        fs::remove_file(&path)
     }
 
     /// Find which state (if any) currently holds the given job id.
@@ -262,6 +351,31 @@ mod tests {
     }
 
     #[test]
+    fn terminal_states_cover_completed_failed_cancelled() {
+        let states = TerminalState::all();
+        assert_eq!(states.len(), 3);
+        assert!(states.contains(&TerminalState::Completed));
+        assert!(states.contains(&TerminalState::Failed));
+        assert!(states.contains(&TerminalState::Cancelled));
+    }
+
+    #[test]
+    fn active_states_cover_pending_running() {
+        let states = ActiveState::all();
+        assert_eq!(states.len(), 2);
+        assert!(states.contains(&ActiveState::Pending));
+        assert!(states.contains(&ActiveState::Running));
+    }
+
+    #[test]
+    fn job_state_from_active_and_terminal() {
+        let pending: JobState = ActiveState::Pending.into();
+        let completed: JobState = TerminalState::Completed.into();
+        assert!(matches!(pending, JobState::Active(ActiveState::Pending)));
+        assert!(matches!(completed, JobState::Terminal(TerminalState::Completed)));
+    }
+
+    #[test]
     fn job_id_format_is_padded_secs_and_hex() {
         let id = JobId::generate();
         let s = id.as_str();
@@ -288,6 +402,12 @@ mod tests {
     }
 
     #[test]
+    fn job_id_submitted_at_unix_extracts_timestamp() {
+        let id = JobId::parse("1744740754_a3f2b1").unwrap();
+        assert_eq!(id.submitted_at_unix(), 1744740754);
+    }
+
+    #[test]
     fn job_id_parse_rejects_path_traversal() {
         assert!(JobId::parse("../etc/passwd").is_err());
         assert!(JobId::parse("0000000000_zzzzzz").is_err());
@@ -306,8 +426,8 @@ mod tests {
     fn write_then_read_round_trips_job() {
         let (_dir, queue) = fresh_queue();
         let job = Job::new(sample_run_args(), "alice".into());
-        queue.write(&job, JobState::Pending).unwrap();
-        let read = queue.read(&job.id, JobState::Pending).unwrap();
+        queue.write(&job, ActiveState::Pending).unwrap();
+        let read = queue.read(&job.id, ActiveState::Pending).unwrap();
         assert_eq!(read.id.as_str(), job.id.as_str());
         assert_eq!(read.submitted_by, "alice");
         assert_eq!(read.args.model_name, "test");
@@ -319,14 +439,14 @@ mod tests {
         let mut written_ids = Vec::new();
         for _ in 0..3 {
             let job = Job::new(sample_run_args(), "alice".into());
-            queue.write(&job, JobState::Pending).unwrap();
+            queue.write(&job, ActiveState::Pending).unwrap();
             written_ids.push(job.id.0.clone());
             // Ensure distinct ids (random suffix usually does this, but be safe)
             thread::sleep(Duration::from_millis(2));
         }
         written_ids.sort();
         let listed: Vec<String> = queue
-            .list(JobState::Pending)
+            .list(ActiveState::Pending)
             .unwrap()
             .into_iter()
             .map(|id| id.0)
@@ -337,19 +457,19 @@ mod tests {
     #[test]
     fn list_on_empty_state_returns_empty_vec() {
         let (_dir, queue) = fresh_queue();
-        assert!(queue.list(JobState::Running).unwrap().is_empty());
+        assert!(queue.list(ActiveState::Running).unwrap().is_empty());
     }
 
     #[test]
     fn transition_moves_file_between_state_dirs() {
         let (_dir, queue) = fresh_queue();
         let job = Job::new(sample_run_args(), "alice".into());
-        queue.write(&job, JobState::Pending).unwrap();
+        queue.write(&job, ActiveState::Pending).unwrap();
         queue
-            .transition(&job.id, JobState::Pending, JobState::Running)
+            .transition(&job.id, ActiveState::Pending, ActiveState::Running)
             .unwrap();
-        assert!(queue.list(JobState::Pending).unwrap().is_empty());
-        let running = queue.list(JobState::Running).unwrap();
+        assert!(queue.list(ActiveState::Pending).unwrap().is_empty());
+        let running = queue.list(ActiveState::Running).unwrap();
         assert_eq!(running.len(), 1);
         assert_eq!(running[0].as_str(), job.id.as_str());
     }
@@ -358,8 +478,12 @@ mod tests {
     fn transition_fails_when_source_state_wrong() {
         let (_dir, queue) = fresh_queue();
         let job = Job::new(sample_run_args(), "alice".into());
-        queue.write(&job, JobState::Pending).unwrap();
-        let result = queue.transition(&job.id, JobState::Running, JobState::Completed);
+        queue.write(&job, ActiveState::Pending).unwrap();
+        let result = queue.transition(
+            &job.id,
+            ActiveState::Running,
+            TerminalState::Completed,
+        );
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), ErrorKind::NotFound);
     }
@@ -368,12 +492,18 @@ mod tests {
     fn find_returns_current_state() {
         let (_dir, queue) = fresh_queue();
         let job = Job::new(sample_run_args(), "alice".into());
-        queue.write(&job, JobState::Pending).unwrap();
-        assert_eq!(queue.find(&job.id).unwrap(), Some(JobState::Pending));
+        queue.write(&job, ActiveState::Pending).unwrap();
+        assert_eq!(
+            queue.find(&job.id).unwrap(),
+            Some(ActiveState::Pending.into()),
+        );
         queue
-            .transition(&job.id, JobState::Pending, JobState::Failed)
+            .transition(&job.id, ActiveState::Pending, TerminalState::Failed)
             .unwrap();
-        assert_eq!(queue.find(&job.id).unwrap(), Some(JobState::Failed));
+        assert_eq!(
+            queue.find(&job.id).unwrap(),
+            Some(TerminalState::Failed.into()),
+        );
     }
 
     #[test]
@@ -389,8 +519,8 @@ mod tests {
         // remains after a successful write.
         let (_dir, queue) = fresh_queue();
         let job = Job::new(sample_run_args(), "alice".into());
-        queue.write(&job, JobState::Pending).unwrap();
-        let entries: Vec<PathBuf> = fs::read_dir(queue.dir_for(JobState::Pending))
+        queue.write(&job, ActiveState::Pending).unwrap();
+        let entries: Vec<PathBuf> = fs::read_dir(queue.dir_for(ActiveState::Pending))
             .unwrap()
             .map(|e| e.unwrap().path())
             .collect();
@@ -406,11 +536,11 @@ mod tests {
     fn list_ignores_files_with_invalid_id_format() {
         let (_dir, queue) = fresh_queue();
         let job = Job::new(sample_run_args(), "alice".into());
-        queue.write(&job, JobState::Pending).unwrap();
+        queue.write(&job, ActiveState::Pending).unwrap();
         // Drop a junk file in the same dir
-        fs::write(queue.dir_for(JobState::Pending).join("not-a-job.json"), "{}").unwrap();
-        fs::write(queue.dir_for(JobState::Pending).join("README"), "x").unwrap();
-        let listed = queue.list(JobState::Pending).unwrap();
+        fs::write(queue.dir_for(ActiveState::Pending).join("not-a-job.json"), "{}").unwrap();
+        fs::write(queue.dir_for(ActiveState::Pending).join("README"), "x").unwrap();
+        let listed = queue.list(ActiveState::Pending).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].as_str(), job.id.as_str());
     }

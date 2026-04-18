@@ -4,6 +4,8 @@
 //!   move it to `failed/` (we can't safely resume mid-training).
 //! - Drain `pending/` in FIFO order (oldest job first).
 //! - Watch `pending/` via inotify; wake on new files and drain again.
+//! - Reap terminal jobs (completed/failed/cancelled) older than the
+//!   configured retention period, on startup and every hour thereafter.
 //!
 //! Execution is delegated through the `JobExecutor` trait so tests can
 //! substitute a synchronous mock without spawning subprocesses.
@@ -16,7 +18,7 @@ use std::time::Duration;
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
-use crate::queue::{Job, JobId, JobState, QueueDir};
+use crate::queue::{ActiveState, Job, JobId, QueueDir, TerminalState};
 
 /// What happened when the executor ran a job.
 pub enum ExecutionResult {
@@ -56,21 +58,29 @@ pub struct Daemon<'a, E: JobExecutor> {
     queue: &'a QueueDir,
     executor: &'a E,
     training_dir: PathBuf,
+    retention_max_age: Duration,
+    reap_interval: Duration,
 }
 
 impl<'a, E: JobExecutor> Daemon<'a, E> {
-    pub fn new(queue: &'a QueueDir, executor: &'a E, training_dir: PathBuf) -> Self {
-        Self { queue, executor, training_dir }
+    pub fn new(
+        queue: &'a QueueDir,
+        executor: &'a E,
+        training_dir: PathBuf,
+        retention_max_age: Duration,
+        reap_interval: Duration,
+    ) -> Self {
+        Self { queue, executor, training_dir, retention_max_age, reap_interval }
     }
 
     /// Sweep `running/` on startup. Anything present is an orphan from a
     /// previous daemon crash — we can't resume mid-training, so it goes to
     /// `failed/`. Returns the count moved.
     pub fn recover_orphans(&self) -> io::Result<usize> {
-        let orphans = self.queue.list(JobState::Running)?;
+        let orphans = self.queue.list(ActiveState::Running)?;
         let count = orphans.len();
         for id in orphans {
-            self.queue.transition(&id, JobState::Running, JobState::Failed)?;
+            self.queue.transition(&id, ActiveState::Running, TerminalState::Failed)?;
         }
         Ok(count)
     }
@@ -80,12 +90,12 @@ impl<'a, E: JobExecutor> Daemon<'a, E> {
     /// race, missing file) are logged and swallowed; an outer loop should
     /// keep calling `process_one` until it returns `None`.
     pub fn process_one(&self) -> io::Result<Option<JobId>> {
-        let pending = self.queue.list(JobState::Pending)?;
+        let pending = self.queue.list(ActiveState::Pending)?;
         let Some(id) = pending.into_iter().next() else {
             return Ok(None);
         };
 
-        let job = match self.queue.read(&id, JobState::Pending) {
+        let job = match self.queue.read(&id, ActiveState::Pending) {
             Ok(job) => job,
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 // Cancelled/claimed between list and read — fine, try next time.
@@ -94,7 +104,7 @@ impl<'a, E: JobExecutor> Daemon<'a, E> {
             Err(err) => return Err(err),
         };
 
-        if let Err(err) = self.queue.transition(&id, JobState::Pending, JobState::Running) {
+        if let Err(err) = self.queue.transition(&id, ActiveState::Pending, ActiveState::Running) {
             if err.kind() == io::ErrorKind::NotFound {
                 return Ok(None);
             }
@@ -103,13 +113,13 @@ impl<'a, E: JobExecutor> Daemon<'a, E> {
 
         let result = self.executor.execute(&job, &self.training_dir);
         let final_state = match result {
-            ExecutionResult::Success => JobState::Completed,
+            ExecutionResult::Success => TerminalState::Completed,
             ExecutionResult::Failure(message) => {
                 eprintln!("Job {} failed: {message}", id.as_str());
-                JobState::Failed
+                TerminalState::Failed
             }
         };
-        self.queue.transition(&id, JobState::Running, final_state)?;
+        self.queue.transition(&id, ActiveState::Running, final_state)?;
         Ok(Some(id))
     }
 
@@ -120,6 +130,21 @@ impl<'a, E: JobExecutor> Daemon<'a, E> {
             count += 1;
         }
         Ok(count)
+    }
+
+    /// Remove terminal jobs older than `max_age`. Thin wrapper around
+    /// `queue_ops::reap_expired` so the daemon can call it at the right
+    /// points in its lifecycle.
+    pub fn reap_expired(&self, max_age: Duration) -> io::Result<usize> {
+        crate::queue_ops::reap_expired(self.queue, max_age)
+    }
+
+    fn reap_and_log(&self) -> io::Result<()> {
+        let reaped = self.reap_expired(self.retention_max_age)?;
+        if reaped > 0 {
+            eprintln!("Reaped {reaped} expired terminal job(s)");
+        }
+        Ok(())
     }
 
     /// Long-running entrypoint: ensure dirs, recover orphans, drain initial
@@ -140,7 +165,9 @@ impl<'a, E: JobExecutor> Daemon<'a, E> {
             eprintln!("Processed {initial} initial pending job(s)");
         }
 
-        let pending_dir = self.queue.dir_for(JobState::Pending);
+        self.reap_and_log()?;
+
+        let pending_dir = self.queue.dir_for(ActiveState::Pending);
         let (sender, receiver) = channel::<()>();
         let mut watcher = notify::recommended_watcher(
             move |event: Result<notify::Event, notify::Error>| {
@@ -155,12 +182,24 @@ impl<'a, E: JobExecutor> Daemon<'a, E> {
         eprintln!("Watching {} for new jobs", pending_dir.display());
 
         loop {
-            // Block until the next inotify event.
-            receiver.recv()?;
-            // Coalesce a burst of events (e.g. tmp-then-rename emits two)
-            // so we drain once per logical submission, not twice.
-            while receiver.recv_timeout(Duration::from_millis(100)).is_ok() {}
-            self.drain_pending()?;
+            // Block until either an inotify event or the reap interval,
+            // whichever comes first. This ensures retention runs hourly
+            // even when no new jobs are submitted.
+            match receiver.recv_timeout(self.reap_interval) {
+                Ok(()) => {
+                    // Coalesce a burst of events (e.g. tmp-then-rename
+                    // emits two) so we drain once, not twice.
+                    while receiver.recv_timeout(Duration::from_millis(100)).is_ok() {}
+                    self.drain_pending()?;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // No new jobs — just run the reaper.
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("inotify watcher disconnected".into());
+                }
+            }
+            self.reap_and_log()?;
         }
     }
 }
@@ -168,6 +207,7 @@ impl<'a, E: JobExecutor> Daemon<'a, E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::queue::{ActiveState, TerminalState};
     use crate::queue_ops::submit;
     use crate::run_args::RunArgs;
     use std::path::PathBuf;
@@ -191,6 +231,9 @@ mod tests {
             ephemeral: false,
         }
     }
+
+    const TEST_RETENTION: Duration = Duration::from_secs(86_400);
+    const TEST_REAP_INTERVAL: Duration = Duration::from_secs(3_600);
 
     fn fresh_queue() -> (tempfile::TempDir, QueueDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -247,22 +290,22 @@ mod tests {
         let (_dir, queue) = fresh_queue();
         // Submit and force into running, simulating prior daemon crash
         let id = submit(&queue, sample_args(), "alice".into()).unwrap();
-        queue.transition(&id, JobState::Pending, JobState::Running).unwrap();
+        queue.transition(&id, ActiveState::Pending, ActiveState::Running).unwrap();
 
         let executor = RecordingExecutor::always_succeed();
-        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"));
+        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"), TEST_RETENTION, TEST_REAP_INTERVAL);
         let recovered = daemon.recover_orphans().unwrap();
 
         assert_eq!(recovered, 1);
-        assert_eq!(queue.find(&id).unwrap(), Some(JobState::Failed));
-        assert!(queue.list(JobState::Running).unwrap().is_empty());
+        assert_eq!(queue.find(&id).unwrap(), Some(TerminalState::Failed.into()));
+        assert!(queue.list(ActiveState::Running).unwrap().is_empty());
     }
 
     #[test]
     fn process_one_returns_none_on_empty_queue() {
         let (_dir, queue) = fresh_queue();
         let executor = RecordingExecutor::always_succeed();
-        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"));
+        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"), TEST_RETENTION, TEST_REAP_INTERVAL);
         assert!(daemon.process_one().unwrap().is_none());
     }
 
@@ -271,12 +314,12 @@ mod tests {
         let (_dir, queue) = fresh_queue();
         let id = submit(&queue, sample_args(), "alice".into()).unwrap();
         let executor = RecordingExecutor::always_succeed();
-        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"));
+        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"), TEST_RETENTION, TEST_REAP_INTERVAL);
 
         let processed = daemon.process_one().unwrap().unwrap();
 
         assert_eq!(processed.as_str(), id.as_str());
-        assert_eq!(queue.find(&id).unwrap(), Some(JobState::Completed));
+        assert_eq!(queue.find(&id).unwrap(), Some(TerminalState::Completed.into()));
         assert_eq!(executor.seen_ids(), vec![id.as_str().to_string()]);
     }
 
@@ -287,11 +330,11 @@ mod tests {
         let executor = RecordingExecutor::with_results(vec![
             ExecutionResult::Failure("simulated".into()),
         ]);
-        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"));
+        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"), TEST_RETENTION, TEST_REAP_INTERVAL);
 
         daemon.process_one().unwrap().unwrap();
 
-        assert_eq!(queue.find(&id).unwrap(), Some(JobState::Failed));
+        assert_eq!(queue.find(&id).unwrap(), Some(TerminalState::Failed.into()));
     }
 
     #[test]
@@ -309,13 +352,13 @@ mod tests {
         submitted_ids.sort();
 
         let executor = RecordingExecutor::always_succeed();
-        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"));
+        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"), TEST_RETENTION, TEST_REAP_INTERVAL);
         let processed = daemon.drain_pending().unwrap();
 
         assert_eq!(processed, 3);
         assert_eq!(executor.seen_ids(), submitted_ids);
-        assert_eq!(queue.list(JobState::Completed).unwrap().len(), 3);
-        assert!(queue.list(JobState::Pending).unwrap().is_empty());
+        assert_eq!(queue.list(TerminalState::Completed).unwrap().len(), 3);
+        assert!(queue.list(ActiveState::Pending).unwrap().is_empty());
     }
 
     #[test]
@@ -334,11 +377,11 @@ mod tests {
             ExecutionResult::Success,
             ExecutionResult::Failure("first".into()),
         ]);
-        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"));
+        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"), TEST_RETENTION, TEST_REAP_INTERVAL);
         daemon.drain_pending().unwrap();
 
-        assert_eq!(queue.list(JobState::Completed).unwrap().len(), 1);
-        assert_eq!(queue.list(JobState::Failed).unwrap().len(), 2);
+        assert_eq!(queue.list(TerminalState::Completed).unwrap().len(), 1);
+        assert_eq!(queue.list(TerminalState::Failed).unwrap().len(), 2);
     }
 
     #[test]
@@ -350,10 +393,47 @@ mod tests {
         crate::queue_ops::cancel_pending(&queue, &id).unwrap();
 
         let executor = RecordingExecutor::always_succeed();
-        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"));
+        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"), TEST_RETENTION, TEST_REAP_INTERVAL);
 
         // No pending now, so process_one returns None
         assert!(daemon.process_one().unwrap().is_none());
         assert!(executor.seen_ids().is_empty());
+    }
+
+    #[test]
+    fn reap_expired_removes_old_terminal_jobs_after_drain() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let (_dir, queue) = fresh_queue();
+        let max_age = Duration::from_secs(86_400);
+
+        // Craft an old completed job (2 days ago)
+        let old_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 2 * 86_400;
+        let suffix: u32 = rand::Rng::random_range(&mut rand::rng(), 0..=0xFF_FFFF);
+        let raw_id = format!("{old_secs:010}_{suffix:06x}");
+        let old_id = crate::queue::JobId::parse(&raw_id).unwrap();
+        let old_job = crate::queue::Job {
+            id: old_id.clone(),
+            submitted_at_unix: old_secs,
+            submitted_by: "test".into(),
+            args: sample_args(),
+        };
+        queue.write(&old_job, TerminalState::Completed).unwrap();
+
+        // Submit a fresh job that will complete normally
+        let fresh_id = submit(&queue, sample_args(), "alice".into()).unwrap();
+        let executor = RecordingExecutor::always_succeed();
+        let daemon = Daemon::new(&queue, &executor, PathBuf::from("/tmp"), TEST_RETENTION, TEST_REAP_INTERVAL);
+
+        daemon.drain_pending().unwrap();
+        let reaped = daemon.reap_expired(max_age).unwrap();
+
+        assert_eq!(reaped, 1);
+        assert_eq!(queue.find(&old_id).unwrap(), None);
+        // Fresh completed job is still there
+        assert_eq!(queue.find(&fresh_id).unwrap(), Some(TerminalState::Completed.into()));
     }
 }
