@@ -561,7 +561,13 @@
             });
 
             source.addEventListener('error', () => {
-                document.getElementById('status-dot').className = 'status-indicator connecting';
+                // Don't show "Reconnecting..." if training already completed —
+                // the server closes the SSE stream when the log is fully sent,
+                // which triggers a browser reconnect. Showing amber during that
+                // brief reconnect is misleading.
+                const statusDot = document.getElementById('status-dot');
+                if (statusDot.className.includes('complete')) return;
+                statusDot.className = 'status-indicator connecting';
                 document.getElementById('status-label').textContent = 'Reconnecting...';
             });
         }

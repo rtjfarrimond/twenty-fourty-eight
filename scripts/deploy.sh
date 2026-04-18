@@ -97,14 +97,15 @@ else
     echo "--- Config exists, not overwriting ---"
 fi
 
-# Install Claude Code skills for any user with ~/.claude/skills/
+# Install Claude Code skills (each is a <name>/SKILL.md directory)
 echo "--- Installing Claude Code skills ---"
 SKILLS_DIR="$HOME/.claude/skills"
-mkdir -p "$SKILLS_DIR"
-for skill in "$PROJECT_ROOT"/skills/*.md; do
-    [ -f "$skill" ] || continue
-    cp "$skill" "$SKILLS_DIR/"
-    echo "  Installed $(basename "$skill")"
+for skill_dir in "$PROJECT_ROOT"/skills/*/; do
+    [ -f "$skill_dir/SKILL.md" ] || continue
+    skill_name="$(basename "$skill_dir")"
+    mkdir -p "$SKILLS_DIR/$skill_name"
+    cp "$skill_dir/SKILL.md" "$SKILLS_DIR/$skill_name/SKILL.md"
+    echo "  Installed skill: $skill_name"
 done
 
 # Install model metadata (always update — these are checked into the repo)
@@ -126,15 +127,8 @@ for bin_file in "$PROJECT_ROOT"/training/*.bin; do
     fi
 done
 
-# Copy training logs if they exist
-for log_file in "$PROJECT_ROOT"/training/*.log.jsonl; do
-    [ -f "$log_file" ] || continue
-    sudo cp -p "$log_file" /var/lib/2048-solver/training/
-done
-for config_file in "$PROJECT_ROOT"/training/*.config.json; do
-    [ -f "$config_file" ] || continue
-    sudo cp -p "$config_file" /var/lib/2048-solver/training/
-done
+# Training logs are now deployed alongside models via runner.rs move_to().
+# No need to copy from the repo working directory.
 
 # models.json now lives alongside the .bin files in the data dir, served
 # by the /models.json axum route. Clean up any stale copy in the static

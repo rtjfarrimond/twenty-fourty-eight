@@ -1,7 +1,6 @@
 ---
 name: training
 description: Submit training jobs to the 2048 solver training queue
-user_invocable: true
 ---
 
 # 2048 Training Job Submission

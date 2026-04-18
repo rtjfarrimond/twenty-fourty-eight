@@ -10,6 +10,20 @@ use std::path::PathBuf;
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
+fn default_models_dir() -> PathBuf {
+    PathBuf::from("/var/lib/2048-solver/models")
+}
+
+/// Deserialises a PathBuf that may be null in legacy queue JSON (from when
+/// models_dir was Option<PathBuf>). Null falls back to the default path.
+fn deserialize_models_dir<'de, D>(deserializer: D) -> Result<PathBuf, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<PathBuf> = Option::deserialize(deserializer)?;
+    Ok(value.unwrap_or_else(default_models_dir))
+}
+
 /// Arguments for a single training execution. Matches the historical flat
 /// CLI for backward compatibility — the `run` and `submit` subcommands both
 /// expose this set of flags verbatim.
@@ -63,6 +77,7 @@ pub struct RunArgs {
 
     /// Directory to deploy the trained model into. The .bin, .log.jsonl,
     /// and .config.json are moved here and models.json is regenerated.
+    #[serde(default = "default_models_dir", deserialize_with = "deserialize_models_dir")]
     #[arg(long, default_value = "/var/lib/2048-solver/models")]
     pub models_dir: PathBuf,
 
@@ -85,6 +100,7 @@ pub struct RunArgs {
     /// or deploy. Only the .log.jsonl and .config.json are written.
     /// Useful for parameter sweeps where the training curve is the goal,
     /// not the model artefact.
+    #[serde(default)]
     #[arg(long, default_value_t = false)]
     pub ephemeral: bool,
 }
@@ -199,5 +215,33 @@ mod tests {
         let args = sample_args();
         let argv = args.to_argv();
         assert!(!argv.iter().any(|s| s == "--description"));
+    }
+
+    #[test]
+    fn deserialise_null_models_dir_defaults_to_standard_path() {
+        let json = r#"{
+            "games": 1000, "eval_interval": 100, "eval_games": 50,
+            "model_name": "test", "optimistic_init": 0.0,
+            "random_init_amplitude": 0.0, "random_init_seed": 42,
+            "patterns": "4x6", "learning_rate": 0.0025,
+            "models_dir": null,
+            "description": null, "algorithm": "serial", "threads": 1
+        }"#;
+        let parsed: RunArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.models_dir, PathBuf::from("/var/lib/2048-solver/models"));
+    }
+
+    #[test]
+    fn deserialise_old_json_without_ephemeral_defaults_to_false() {
+        let json = r#"{
+            "games": 1000, "eval_interval": 100, "eval_games": 50,
+            "model_name": "test", "optimistic_init": 0.0,
+            "random_init_amplitude": 0.0, "random_init_seed": 42,
+            "patterns": "4x6", "learning_rate": 0.0025,
+            "models_dir": "/var/lib/2048-solver/models",
+            "description": null, "algorithm": "serial", "threads": 1
+        }"#;
+        let parsed: RunArgs = serde_json::from_str(json).unwrap();
+        assert!(!parsed.ephemeral);
     }
 }
