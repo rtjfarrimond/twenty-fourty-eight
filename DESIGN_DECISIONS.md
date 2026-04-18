@@ -620,5 +620,35 @@ Where β is the meta-learning rate (default 1.0), m is total feature count
 The network is the inference artifact; TC accumulators are training-only state.
 Save/load format unchanged — only V weights are persisted.
 
+### Hogwild + TC beta tuning (8×6, hogwild-14, 1M games)
+
+TC's coherence signal breaks down under Hogwild: concurrent threads push
+different TD errors from different games into the same E/A accumulators,
+making every weight look incoherent. Higher beta amplifies this, causing
+weight divergence → Inf evaluations → NaN TD errors (Inf − Inf, IEEE 754).
+
+Beta sweep results (1M games, 8×6 patterns, hogwild-14):
+
+| β    | Final avg score | Status                |
+|------|----------------:|:----------------------|
+| 0.01 |          53,087 | Learning, but slow    |
+| 0.05 |         106,320 | Good                  |
+| 0.1  |         132,462 | Good                  |
+| 0.3  |         163,034 | Good                  |
+| 0.5  |         232,604 | **Best**              |
+| 0.7  |          87,817 | Starting to diverge   |
+| 1.0  |             744 | Diverged              |
+| 1.5  |               0 | Completely diverged   |
+| 2.0  |               0 | Completely diverged   |
+
+**Conclusion:** β=0.5 is optimal for hogwild-14 with 8×6 patterns. The
+paper's default β=1.0 works only in serial mode. The optimal β likely
+scales inversely with thread count — more threads = more cross-game noise
+in the coherence signal = lower β needed.
+
+NaN guard added to `tc_update_orientation` and `TcState::accumulate` to
+prevent catastrophic NaN poisoning, but the real fix is keeping β below
+the divergence threshold.
+
 ---
 

@@ -90,7 +90,7 @@ mod tests {
             random_init_seed: 42,
             patterns: "4x6".into(),
             learning_rate: 0.0025,
-            models_dir: None,
+            models_dir: PathBuf::from("/var/lib/2048-solver/models"),
             description: None,
             algorithm: "serial".into(),
             threads: 1,
@@ -167,7 +167,7 @@ mod tests {
         let mut args = sample_args();
         args.model_name = "my-special-model".into();
         args.games = 9_999_999;
-        args.models_dir = Some(PathBuf::from("/tmp/x"));
+        args.models_dir = PathBuf::from("/tmp/x");
         let id = submit(&queue, args, "bob".into()).unwrap();
 
         let snap = QueueSnapshot::load(&queue).unwrap();
@@ -175,6 +175,6 @@ mod tests {
         assert_eq!(job.submitted_by, "bob");
         assert_eq!(job.args.model_name, "my-special-model");
         assert_eq!(job.args.games, 9_999_999);
-        assert_eq!(job.args.models_dir, Some(PathBuf::from("/tmp/x")));
+        assert_eq!(job.args.models_dir, PathBuf::from("/tmp/x"));
     }
 }

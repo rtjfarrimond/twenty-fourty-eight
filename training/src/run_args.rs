@@ -61,10 +61,10 @@ pub struct RunArgs {
     #[arg(long, default_value_t = 0.0025)]
     pub learning_rate: f32,
 
-    /// Directory to deploy the trained model into. When set, the .bin and
-    /// .meta.toml are copied here and models.json is regenerated.
-    #[arg(long)]
-    pub models_dir: Option<PathBuf>,
+    /// Directory to deploy the trained model into. The .bin, .log.jsonl,
+    /// and .config.json are moved here and models.json is regenerated.
+    #[arg(long, default_value = "/var/lib/2048-solver/models")]
+    pub models_dir: PathBuf,
 
     /// Human-readable description for the .meta.toml sidecar
     #[arg(long)]
@@ -100,10 +100,8 @@ impl RunArgs {
             "--algorithm".into(), self.algorithm.clone(),
             "--threads".into(), self.threads.to_string(),
         ];
-        if let Some(dir) = &self.models_dir {
-            argv.push("--models-dir".into());
-            argv.push(dir.display().to_string());
-        }
+        argv.push("--models-dir".into());
+        argv.push(self.models_dir.display().to_string());
         if let Some(desc) = &self.description {
             argv.push("--description".into());
             argv.push(desc.clone());
@@ -127,7 +125,7 @@ mod tests {
             random_init_seed: 42,
             patterns: "4x6".into(),
             learning_rate: 0.0025,
-            models_dir: None,
+            models_dir: PathBuf::from("/var/lib/2048-solver/models"),
             description: None,
             algorithm: "serial".into(),
             threads: 1,
@@ -143,6 +141,7 @@ mod tests {
         assert_eq!(args.model_name, parsed.model_name);
         assert_eq!(args.algorithm, parsed.algorithm);
         assert_eq!(args.learning_rate, parsed.learning_rate);
+        assert_eq!(args.models_dir, parsed.models_dir);
     }
 
     #[test]
@@ -151,23 +150,21 @@ mod tests {
         let argv = args.to_argv();
         assert!(argv.windows(2).any(|w| w[0] == "--games" && w[1] == "1000"));
         assert!(argv.windows(2).any(|w| w[0] == "--model-name" && w[1] == "test"));
+        assert!(argv.windows(2).any(|w| w[0] == "--models-dir"));
     }
 
     #[test]
-    fn to_argv_omits_optional_when_absent() {
-        let args = sample_args();
-        let argv = args.to_argv();
-        assert!(!argv.iter().any(|s| s == "--models-dir"));
-        assert!(!argv.iter().any(|s| s == "--description"));
-    }
-
-    #[test]
-    fn to_argv_includes_optional_when_present() {
+    fn to_argv_includes_description_when_present() {
         let mut args = sample_args();
-        args.models_dir = Some(PathBuf::from("/tmp/models"));
         args.description = Some("Test run".into());
         let argv = args.to_argv();
-        assert!(argv.windows(2).any(|w| w[0] == "--models-dir" && w[1] == "/tmp/models"));
         assert!(argv.windows(2).any(|w| w[0] == "--description" && w[1] == "Test run"));
+    }
+
+    #[test]
+    fn to_argv_omits_description_when_absent() {
+        let args = sample_args();
+        let argv = args.to_argv();
+        assert!(!argv.iter().any(|s| s == "--description"));
     }
 }

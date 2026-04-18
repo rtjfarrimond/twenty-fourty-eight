@@ -170,6 +170,7 @@ mod tests {
     use super::*;
     use crate::queue_ops::submit;
     use crate::run_args::RunArgs;
+    use std::path::PathBuf;
     use std::sync::Mutex;
 
     fn sample_args() -> RunArgs {
@@ -183,7 +184,7 @@ mod tests {
             random_init_seed: 42,
             patterns: "4x6".into(),
             learning_rate: 0.0025,
-            models_dir: None,
+            models_dir: PathBuf::from("/var/lib/2048-solver/models"),
             description: None,
             algorithm: "serial".into(),
             threads: 1,

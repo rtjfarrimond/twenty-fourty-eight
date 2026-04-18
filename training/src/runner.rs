@@ -39,12 +39,8 @@ pub fn execute(args: &RunArgs) -> Result<(), String> {
     network.save(&model_path)
         .map_err(|err| format!("Failed to save model: {err}"))?;
     println!("\nTraining complete.");
-    println!("  Log: {log_path}");
-    println!("  Model: {model_path}");
 
-    if let Some(models_dir) = &args.models_dir {
-        deploy_model(args, models_dir, &model_path, &log_path, &config_path);
-    }
+    deploy_model(args, &args.models_dir, &model_path, &log_path, &config_path);
     Ok(())
 }
 
@@ -131,9 +127,7 @@ fn print_banner(
     println!("  Algorithm: {} ({} thread(s))", args.algorithm, args.threads);
     println!("  Log file: {log_path}");
     println!("  Config file: {config_path}");
-    if let Some(dir) = &args.models_dir {
-        println!("  Deploy to: {}", dir.display());
-    }
+    println!("  Deploy to: {}", args.models_dir.display());
     println!();
 }
 
@@ -256,19 +250,23 @@ fn log_eval_checkpoint(
     );
 }
 
-/// Copies a file, but skips if source and destination resolve to the same path
-/// (which would wipe the file via truncate-before-read).
-fn copy_if_different(source: &str, destination: &PathBuf) {
+/// Moves a file to the destination, skipping if already in place.
+fn move_to(source: &str, destination: &PathBuf) {
     let source_canonical = std::fs::canonicalize(source).ok();
     let dest_canonical = std::fs::canonicalize(destination).ok();
 
     if source_canonical.is_some() && source_canonical == dest_canonical {
-        println!("  Skipping copy (already in place): {source}");
+        println!("  Already in place: {source}");
         return;
     }
 
-    std::fs::copy(source, destination).expect("Failed to copy file");
-    println!("  Copied {source} → {}", destination.display());
+    if let Err(err) = std::fs::rename(source, destination) {
+        // rename fails across filesystems; fall back to copy + remove.
+        std::fs::copy(source, destination)
+            .unwrap_or_else(|_| panic!("Failed to copy {source}: {err}"));
+        std::fs::remove_file(source).ok();
+    }
+    println!("  Moved {source} → {}", destination.display());
 }
 
 fn deploy_model(
@@ -280,12 +278,13 @@ fn deploy_model(
 ) {
     println!("\nDeploying to {}...", models_dir.display());
 
-    let dest_bin = models_dir.join(format!("{}.bin", args.model_name));
-    copy_if_different(model_path, &dest_bin);
+    move_to(model_path, &models_dir.join(format!("{}.bin", args.model_name)));
+    move_to(log_path, &models_dir.join(log_path));
+    move_to(config_path, &models_dir.join(config_path));
 
     let description = args.description.clone().unwrap_or_else(|| {
         format!(
-            "N-tuple network ({} preset) trained with TD(0) via {} algorithm \
+            "N-tuple network ({} preset) trained via {} algorithm \
              ({} thread(s)). {} training games, lr={}, optimistic_init={}, \
              random_init_amplitude={} (seed={}).",
             args.patterns,
@@ -307,12 +306,11 @@ fn deploy_model(
     std::fs::write(&meta_path, &meta_content).expect("Failed to write meta.toml");
     println!("  Wrote {}", meta_path.display());
 
-    let training_dir = models_dir.join("../training");
-    if training_dir.is_dir() {
-        copy_if_different(log_path, &training_dir.join(log_path));
-        copy_if_different(config_path, &training_dir.join(config_path));
-    }
+    run_generate_models(models_dir);
+    println!("Deploy complete.");
+}
 
+fn run_generate_models(models_dir: &PathBuf) {
     let self_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -334,6 +332,4 @@ fn deploy_model(
     } else {
         println!("  Skipping models.json regeneration (generate_models not found)");
     }
-
-    println!("Deploy complete.");
 }
